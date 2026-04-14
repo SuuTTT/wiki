@@ -11,6 +11,7 @@ import torch.optim as optim
 import tyro
 import tqdm
 from torch.distributions.normal import Normal
+from cleanrl_utils.logger import RLTracker
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -20,7 +21,7 @@ class Args:
     seed: int = 1
     torch_deterministic: bool = True
     cuda: bool = True
-    capture_video: bool = True
+    capture_video: bool = False
 
     # PPO Continuous defaults to Pendulum
     env_id: str = "Pendulum-v1"
@@ -46,6 +47,11 @@ def make_env(env_id, seed, idx, capture_video, run_name):
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = gym.wrappers.ClipAction(env)
+        env = gym.wrappers.NormalizeObservation(env)
+        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10), env.observation_space)
+        env = gym.wrappers.NormalizeReward(env)
+        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         env.action_space.seed(seed)
         return env
     return thunk
@@ -98,7 +104,8 @@ if __name__ == "__main__":
     minibatch_size = int(batch_size // args.num_minibatches)
     num_iterations = args.total_timesteps // batch_size
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    writer = SummaryWriter(f"runs/{run_name}")
+    tracker = RLTracker(args.exp_name, args.seed)
+    writer = tracker.writer
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -147,11 +154,15 @@ if __name__ == "__main__":
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs_np).to(device), torch.Tensor(next_done_np).to(device)
 
-            if "final_info" in infos:
-                for info in infos["final_info"]:
-                    if info and "episode" in info:
-                        progress_bar.set_postfix(episodic_return=info['episode']['r'][0])
-                        writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
+            if "_episode" in infos:
+                for idx, d in enumerate(infos["_episode"]):
+                    if d:
+                        r = infos["episode"]["r"][idx].item() if hasattr(infos["episode"]["r"][idx], "item") else infos["episode"]["r"][idx]
+                        l = infos["episode"]["l"][idx].item() if hasattr(infos["episode"]["l"][idx], "item") else infos["episode"]["l"][idx]
+                        tracker.log_episode(r, l)
+                        if 'progress_bar' in locals():
+                            progress_bar.set_postfix(episodic_return=f"{r:.2f}")
+
 
         # GAE Advantage Estimation
         with torch.no_grad():
@@ -214,5 +225,18 @@ if __name__ == "__main__":
                 nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
                 optimizer.step()
 
+        if "v_loss" in locals() and "pg_loss" in locals():
+            tracker.log_metrics("losses", {
+                "value_loss": v_loss.item(), 
+                "policy_loss": pg_loss.item(), 
+                "entropy": entropy_loss.item()
+            })
+            tracker.global_step = global_step
+        tracker.log_sps()
+
     envs.close()
+    try:
+        tracker.save_checkpoint(agent.state_dict() if "agent" in locals() else q_network.state_dict())
+    except:
+        pass
     writer.close()

@@ -5,6 +5,7 @@ import torch.optim as optim
 import numpy as np
 import time
 from torch.distributions.categorical import Categorical
+from cleanrl_utils.logger import RLTracker
 from torch.utils.tensorboard import SummaryWriter
 
 # -----------------
@@ -27,6 +28,7 @@ BATCH_SIZE = NUM_ENVS * NUM_STEPS
 MINIBATCH_SIZE = BATCH_SIZE // NUM_MINIBATCHES
 NUM_ITERATIONS = TOTAL_TIMESTEPS // BATCH_SIZE
 
+tracker = RLTracker("ppo_envpool", 1)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -163,7 +165,7 @@ for iteration in range(1, NUM_ITERATIONS + 1):
             # We must iterate over environments that actually reached done
             for i, d in enumerate(done):
                 if d and not info.get("TimeLimit.truncated", [False]*NUM_ENVS)[i]: 
-                    print(f"global_step={global_step}, ep_return={info['reward'][i]}")
+                    tracker.log_episode(info["reward"][i], 0, None)
 
         # Move to GPU
         # In EnvPool flat numpy structure
@@ -238,5 +240,7 @@ for iteration in range(1, NUM_ITERATIONS + 1):
     if iteration % 5 == 0:
         print(f"Iteration {iteration}/{NUM_ITERATIONS} - SPS: {curr_sps}")
 
+tracker.save_checkpoint(agent.state_dict())
+tracker.close()
 print("✅ EnvPool PPO Tutorial Completed!")
 envs.close()

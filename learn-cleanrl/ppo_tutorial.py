@@ -30,6 +30,7 @@ import tyro
 # PPO outputs a probability distribution over actions to learn a stochastic policy, instead of deterministic Q-values.
 from torch.distributions.categorical import Categorical
 
+from cleanrl_utils.logger import RLTracker
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -45,7 +46,7 @@ class Args:
     env_id: str = "CartPole-v1"                    # Classic Control (Discrete).
     total_timesteps: int = 500000                  
     learning_rate: float = 2.5e-4                  
-    capture_video: bool = True                     # We enable video capture by default
+    capture_video: bool = False                     # We enable video capture by default
     
     num_envs: int = 4                              # Number of parallel environments holding different episodes.
     num_steps: int = 128                           # Rollout length per env per update. Data equals num_envs * num_steps.
@@ -152,7 +153,8 @@ if __name__ == "__main__":
     args.num_iterations = args.total_timesteps // args.batch_size
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     
-    writer = SummaryWriter(f"runs/{run_name}")
+    tracker = RLTracker(args.exp_name, args.seed)
+    writer = tracker.writer
 
     # Set seeds & PyTorch CUDA settings
     random.seed(args.seed)
@@ -220,16 +222,15 @@ if __name__ == "__main__":
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
 
-            if "final_info" in infos:
-                for info in infos["final_info"]:
-                    if info and "episode" in info:
-                        progress_bar.set_postfix(episodic_return=info['episode']['r'][0] if isinstance(info['episode']['r'], np.ndarray) else info['episode']['r'])
-                        tqdm.tqdm.write(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                        writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
+            if "_episode" in infos:
+                for idx, d in enumerate(infos["_episode"]):
+                    if d:
+                        r = infos["episode"]["r"][idx].item() if hasattr(infos["episode"]["r"][idx], "item") else infos["episode"]["r"][idx]
+                        l = infos["episode"]["l"][idx].item() if hasattr(infos["episode"]["l"][idx], "item") else infos["episode"]["l"][idx]
+                        tracker.log_episode(r, l)
+                        if 'progress_bar' in locals():
+                            progress_bar.set_postfix(episodic_return=f"{r:.2f}")
 
-        # ==============================================================================
-        # GENERALIZED ADVANTAGE ESTIMATION (GAE) (wiki/PPO.md Section 2)
-        # ==============================================================================
         with torch.no_grad():
             # Get the expected value of the current state before the next episode rollouts.
             next_value = agent.get_value(next_obs).reshape(1, -1)
@@ -309,5 +310,18 @@ if __name__ == "__main__":
                 nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm) # Clip high gradients!
                 optimizer.step()
 
+        if "v_loss" in locals() and "pg_loss" in locals():
+            tracker.log_metrics("losses", {
+                "value_loss": v_loss.item(), 
+                "policy_loss": pg_loss.item(), 
+                "entropy": entropy_loss.item()
+            })
+            tracker.global_step = global_step
+        tracker.log_sps()
+
     envs.close()
+    try:
+        tracker.save_checkpoint(agent.state_dict() if "agent" in locals() else q_network.state_dict())
+    except:
+        pass
     writer.close()

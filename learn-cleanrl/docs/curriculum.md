@@ -93,3 +93,18 @@ Pushing the boundaries of simulation speed and training throughput requires comp
 * **NVIDIA Isaac Lab (formerly Isaac Gym)**
   * *Concept:* End-to-end GPU-accelerated massive parallel physics simulation designed specifically for reinforcement learning and sim2real transfer.
   * *Placement:* Vital for modern industry robotics, teaching how tens of thousands of environment instances can run simultaneously on a single GPU.
+---
+
+## Part 7: Hierarchical Planning, Abstraction, and RL
+
+To bridge the gap between low-level control and high-level reasoning, RL must incorporate abstraction. This involves hierarchical structures, discovering latent skills, and integrating symbolic logic with continuous control (TAMP).
+
+* **Hierarchical Reinforcement Learning (HRL) & The Options Framework**
+  * *Concept:* Seminal frameworks by Sutton, Precup, and Singh construct temporally extended actions ("options"). Architectures like HIRO (Data-Efficient Hierarchical RL) and FeUdal Networks utilize a high-level manager setting latent goals for a low-level worker.
+  * *Placement:* Introduces temporal and goal-based abstraction, essential for solving long-horizon tasks where standard dense-reward MDPs fail.
+* **Latent Space Abstraction & Skill Discovery**
+  * *Concept:* Work led by researchers like George Konidaris focuses on constructing abstract, discrete representations (and transition models) from continuous pixel/state spaces. Also covers unsupervised skill discovery (e.g., DIAYN - Diversity is All You Need) where agents learn distinct behaviors in a latent space without extrinsic rewards.
+  * *Placement:* Teaches how an agent can autonomously build its own high-level action space and state representation before it even attempts to solve a specific task.
+* **Neuro-Symbolic RL & TAMP (Task and Motion Planning)**
+  * *Concept:* Integrates classic AI symbolic logic (like PDDL - Planning Domain Definition Language) with Deep RL. Works like Tom Silver's bi-level planning (e.g., NSRTs - Neuro-Symbolic Relational Transitions) use a high-level symbolic planner to sequence abstract actions, while a low-level RL policy handles the continuous motor control (the "motion").
+  * *Placement:* The frontier of generalizing RL to complex, multi-step real-world reasoning. Essential for robotics tasks that require both rigorous logical constraints (e.g., "door must be open before entering") and messy continuous physics.

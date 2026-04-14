@@ -9,7 +9,10 @@ import gymnasium as gym
 import numpy as np
 import supersuit as ss
 import torch
+from cleanrl_utils.logger import RLTracker
+import torch
 import torch.nn as nn
+import torch
 import torch.optim as optim
 from torch.distributions.categorical import Categorical
 
@@ -79,6 +82,7 @@ class Agent(nn.Module):
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
 
+tracker = RLTracker("ppo_selfplay", args.seed)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 if args.env_id.startswith("pong"):
@@ -142,7 +146,7 @@ for update in range(1, num_updates + 1):
             if d:
                 # Log when an agent completes a multi-agent episode!
                 if update % 5 == 0 and i == 0:
-                    print(f"global_step={global_step}, selfplay_ep_return={episodic_returns[i]}")
+                        tracker.log_episode(episodic_returns[i], 0, None)
                 episodic_returns[i] = 0
 
         rewards[step] = torch.tensor(reward).to(device).view(-1)
@@ -200,6 +204,10 @@ for update in range(1, num_updates + 1):
             optimizer.step()
 
     if update % 25 == 0:
-        print(f"Iteration {update}/{num_updates}, SPS: {int(global_step / (time.time() - start_time))}")
+        tracker.global_step = global_step
+        tracker.log_sps()
+        tracker.log_metrics("losses", {"value_loss": v_loss.item(), "policy_loss": pg_loss.item(), "entropy": entropy_loss.item()})
 
+tracker.save_checkpoint(agent.state_dict())
+tracker.close()
 print("✅ Multi-Agent Self-Play Tutorial Completed!")

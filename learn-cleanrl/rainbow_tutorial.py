@@ -18,6 +18,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import tyro
 import tqdm
+from cleanrl_utils.logger import RLTracker
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -27,7 +28,7 @@ class Args:
     seed: int = 1
     torch_deterministic: bool = True
     cuda: bool = True
-    capture_video: bool = True  # We want video!
+    capture_video: bool = False  # We want video!
 
     # Algorithm specific arguments
     env_id: str = "CartPole-v1" # Stick to basics
@@ -327,7 +328,8 @@ def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
 if __name__ == "__main__":
     args = tyro.cli(Args)
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    writer = SummaryWriter(f"runs/{run_name}")
+    tracker = RLTracker(args.exp_name, args.seed)
+    writer = tracker.writer
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -375,11 +377,15 @@ if __name__ == "__main__":
 
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
 
-        if "final_info" in infos:
-            for info in infos["final_info"]:
-                if info and "episode" in info:
-                    progress_bar.set_postfix(episodic_return=info['episode']['r'][0])
-                    writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
+        if "_episode" in infos:
+                for idx, d in enumerate(infos["_episode"]):
+                    if d:
+                        r = infos["episode"]["r"][idx].item() if hasattr(infos["episode"]["r"][idx], "item") else infos["episode"]["r"][idx]
+                        l = infos["episode"]["l"][idx].item() if hasattr(infos["episode"]["l"][idx], "item") else infos["episode"]["l"][idx]
+                        tracker.log_episode(r, l)
+                        if 'progress_bar' in locals():
+                            progress_bar.set_postfix(episodic_return=f"{r:.2f}")
+
 
         real_next_obs = next_obs.copy()
         for idx, trunc in enumerate(truncations):
@@ -450,10 +456,18 @@ if __name__ == "__main__":
 
             if global_step % 100 == 0:
                 writer.add_scalar("losses/td_loss", loss.item(), global_step)
+                q_values = (old_pmfs * target_network.support).sum(dim=1).mean()
+                writer.add_scalar("losses/q_values", q_values.item(), global_step)
+                tracker.global_step = global_step
+                tracker.log_sps()
 
         # Hard Network Update
         if global_step > args.learning_starts and global_step % args.target_network_frequency == 0:
             target_network.load_state_dict(q_network.state_dict())
 
     envs.close()
+    try:
+        tracker.save_checkpoint(agent.state_dict() if "agent" in locals() else q_network.state_dict())
+    except:
+        pass
     writer.close()

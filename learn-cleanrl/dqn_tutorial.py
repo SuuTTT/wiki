@@ -26,6 +26,7 @@ import torch.optim as optim        # Optimizers (Adam, SGD, etc.)
 import tyro
 
 # NEW DEPENDENCY: Tensorboard. Used for logging scalars (like reward, loss) to view in a dashboard.
+from cleanrl_utils.logger import RLTracker
 from torch.utils.tensorboard import SummaryWriter
 
 # LOCAL: The replay buffer. Explained in wiki/DQN.md Section 2.
@@ -39,7 +40,7 @@ class Args:
     seed: int = 1                          # Critical for reproducibility.
     torch_deterministic: bool = True       # Ensures GPU operations are deterministic where possible.
     cuda: bool = True                      # We default to using the Vast.ai GPU!
-    capture_video: bool = True             # We enable video capture!
+    capture_video: bool = False             # We enable video capture!
     
     # --- Algorithm Specifics (DQN hyperparameters) ---
     env_id: str = "CartPole-v1"            # Starting with the simplest environment! (See wiki/Environments.md)
@@ -120,7 +121,8 @@ if __name__ == "__main__":
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     
     # Setup Tensorboard
-    writer = SummaryWriter(f"runs/{run_name}")
+    tracker = RLTracker(args.exp_name, args.seed)
+    writer = tracker.writer
 
     # Set seeds for Reproducibility
     random.seed(args.seed)
@@ -178,15 +180,15 @@ if __name__ == "__main__":
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
 
         # Log rewards automatically collected by the RecordEpisodeStatistics wrapper.
-        if "final_info" in infos:
-            for info in infos["final_info"]:
-                if info and "episode" in info:
-                    progress_bar.set_postfix(epsilon=f"{epsilon:.2f}", episodic_return=info['episode']['r'][0] if isinstance(info['episode']['r'], np.ndarray) else info['episode']['r'])
-                    tqdm.tqdm.write(f"[{global_step}/{args.total_timesteps}] Episodic Return: {info['episode']['r']}")
-                    writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                    writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
+        if "_episode" in infos:
+                for idx, d in enumerate(infos["_episode"]):
+                    if d:
+                        r = infos["episode"]["r"][idx].item() if hasattr(infos["episode"]["r"][idx], "item") else infos["episode"]["r"][idx]
+                        l = infos["episode"]["l"][idx].item() if hasattr(infos["episode"]["l"][idx], "item") else infos["episode"]["l"][idx]
+                        tracker.log_episode(r, l)
+                        if 'progress_bar' in locals():
+                            progress_bar.set_postfix(episodic_return=f"{r:.2f}")
 
-        # 3. ADD TO REPLAY BUFFER
         real_next_obs = next_obs.copy()
         # Edge case: If the environment forcefully truncates (time limit), grab the real final state.
         for idx, trunc in enumerate(truncations):
@@ -239,4 +241,8 @@ if __name__ == "__main__":
                 target_param.data.copy_(args.tau * q_param.data + (1.0 - args.tau) * target_param.data)
 
     envs.close()
+    try:
+        tracker.save_checkpoint(agent.state_dict() if "agent" in locals() else q_network.state_dict())
+    except:
+        pass
     writer.close()

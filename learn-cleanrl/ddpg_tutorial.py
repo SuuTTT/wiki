@@ -18,6 +18,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import tyro
+from cleanrl_utils.logger import RLTracker
 from torch.utils.tensorboard import SummaryWriter
 
 from cleanrl_utils.buffers import ReplayBuffer
@@ -29,7 +30,7 @@ class Args:
     torch_deterministic: bool = True
     cuda: bool = True
     track: bool = False
-    capture_video: bool = True
+    capture_video: bool = False
 
     # Algorithm specific arguments
     # THEORY: We are no longer using Discrete CartPole. 
@@ -126,7 +127,8 @@ if __name__ == "__main__":
     args = tyro.cli(Args)
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     
-    writer = SummaryWriter(f"runs/{run_name}")
+    tracker = RLTracker(args.exp_name, args.seed)
+    writer = tracker.writer
 
     # Set seeds
     random.seed(args.seed)
@@ -191,15 +193,15 @@ if __name__ == "__main__":
         next_obs, rewards, terminations, truncations, infos = envs.step(actions)
 
         # Log Episode
-        if "final_info" in infos:
-            for info in infos["final_info"]:
-                if info and "episode" in info:
-                    progress_bar.set_postfix(episodic_return=info['episode']['r'][0] if isinstance(info['episode']['r'], np.ndarray) else info['episode']['r'])
-                    tqdm.tqdm.write(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-                    writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-                    break
+        if "_episode" in infos:
+                for idx, d in enumerate(infos["_episode"]):
+                    if d:
+                        r = infos["episode"]["r"][idx].item() if hasattr(infos["episode"]["r"][idx], "item") else infos["episode"]["r"][idx]
+                        l = infos["episode"]["l"][idx].item() if hasattr(infos["episode"]["l"][idx], "item") else infos["episode"]["l"][idx]
+                        tracker.log_episode(r, l)
+                        if 'progress_bar' in locals():
+                            progress_bar.set_postfix(episodic_return=f"{r:.2f}")
 
-        # Save to buffer
         real_next_obs = next_obs.copy()
         for idx, trunc in enumerate(truncations):
             if trunc and "final_observation" in infos:
@@ -262,4 +264,8 @@ if __name__ == "__main__":
                 writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     envs.close()
+    try:
+        tracker.save_checkpoint(agent.state_dict() if "agent" in locals() else q_network.state_dict())
+    except:
+        pass
     writer.close()
