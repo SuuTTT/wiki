@@ -1,0 +1,15 @@
+# Logs
+logs/
+*.log
+
+# Video Results
+results/
+result/
+*.mp4
+
+# Python Cache
+*.pyc
+__pycache__/
+
+# Tensorboard Logs
+*tfevents*

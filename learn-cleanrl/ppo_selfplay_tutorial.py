@@ -1,41 +1,25 @@
-# ==============================================================================
-# SELF-PLAY PPO TUTORIAL (Refer to wiki/SelfPlay-MA.md for theory)
-# ==============================================================================
-
+import argparse
 import os
+os.environ["SDL_VIDEODRIVER"] = "dummy"
 import random
 import time
-from dataclasses import dataclass
+import importlib
 
 import gymnasium as gym
 import numpy as np
+import supersuit as ss
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import tyro
-import tqdm
 from torch.distributions.categorical import Categorical
-from torch.utils.tensorboard import SummaryWriter
 
-import importlib
-import supersuit as ss
-
-@dataclass
 class Args:
-    exp_name: str = os.path.basename(__file__)[: -len(".py")]
+    env_id: str = "pistonball_v6"
     seed: int = 1
-    torch_deterministic: bool = True
-    cuda: bool = True
-    capture_video: bool = False
-
-    # This environment is multi-agent! 2 Paddles!
-    env_id: str = "pong_v3"
-    
-    total_timesteps: int = 10000000
+    total_timesteps: int = 1_000_000
     learning_rate: float = 2.5e-4
-    num_envs: int = 16  # 16 Total Environments (giving us 32 Agents on field!)
+    num_envs: int = 8
     num_steps: int = 128
-    
     gamma: float = 0.99
     gae_lambda: float = 0.95
     num_minibatches: int = 4
@@ -45,19 +29,19 @@ class Args:
     vf_coef: float = 0.5
     max_grad_norm: float = 0.5
 
+args = Args()
+args.batch_size = int(args.num_envs * args.num_steps)
+args.minibatch_size = int(args.batch_size // args.num_minibatches)
+num_updates = args.total_timesteps // args.batch_size
+
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
     torch.nn.init.constant_(layer.bias, bias_const)
     return layer
 
-# ------------------------------------------------------------------------------
-# THE PARAMETER SHARING NETWORK (Self-Play Brain)
-# ------------------------------------------------------------------------------
 class Agent(nn.Module):
     def __init__(self, envs):
         super().__init__()
-        # Since we use FrameStack=4, the input is 4 Grayscale Images. Let's make it robust!
-        # SuperSuit reduces color, but let's assume it outputs 4 channels cleanly.
         self.network = nn.Sequential(
             layer_init(nn.Conv2d(4, 32, 8, stride=4)),
             nn.ReLU(),
@@ -73,90 +57,149 @@ class Agent(nn.Module):
         self.critic = layer_init(nn.Linear(512, 1), std=1)
 
     def get_value(self, x):
-        hidden = self.network(x / 255.0)
-        return self.critic(hidden)
+        x = x.clone().float()
+        if x.shape[-1] == 4:
+            x[:, :, :, [0, 1, 2, 3]] /= 255.0
+            x = x.permute((0, 3, 1, 2))
+        else:
+            x /= 255.0
+        return self.critic(self.network(x))
 
     def get_action_and_value(self, x, action=None):
-        hidden = self.network(x / 255.0)
+        x = x.clone().float()
+        if x.shape[-1] == 4:
+            x[:, :, :, [0, 1, 2, 3]] /= 255.0
+            x = x.permute((0, 3, 1, 2))
+        else:
+            x /= 255.0
+        hidden = self.network(x)
         logits = self.actor(hidden)
         probs = Categorical(logits=logits)
-        
         if action is None:
             action = probs.sample()
-            
         return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
 
-if __name__ == "__main__":
-    args = tyro.cli(Args)
-    
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    writer = SummaryWriter(f"runs/{run_name}")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
-
-    # ------------------------------------------------------------------------------
-    # SUPERSUIT FLATTENING (Multi-Agent -> Single-Agent Array)
-    # ------------------------------------------------------------------------------
-    
-    # This brings in PettingZoo's Atari Pong environment (2 agents dynamically tracked)
+if args.env_id.startswith("pong"):
     env = importlib.import_module(f"pettingzoo.atari.{args.env_id}").parallel_env()
-    
-    # Standard Atari Processing applied mathematically to BOTH agents symmetrically
-    env = ss.max_observation_v0(env, 2)
-    env = ss.frame_skip_v0(env, 4)
-    env = ss.clip_reward_v0(env, lower_bound=-1, upper_bound=1)
-    env = ss.color_reduction_v0(env, mode="B") # Grayscale
-    env = ss.resize_v1(env, x_size=84, y_size=84)
-    env = ss.frame_stack_v1(env, 4)
-    env = ss.expand_dims_v0(env) # Adds channel dimension if needed
-    env = ss.agent_indicator_v0(env, type_only=False) # Adds visual indicators to help the agent know which paddle it is controlling
-    
-    # THE FLATTENING TRICK:
-    # 16 games * 2 paddles = 32 completely independent "environments" mathematically
-    env = ss.pettingzoo_env_to_vec_env_v1(env)
-    
-    # We ask SuperSuit to literally lie to Gym, telling it we just have 32 standard games
-    envs = ss.concat_vec_envs_v1(env, args.num_envs, num_cpus=0, base_class="gym")
-    
-    # Because SuperSuit hacked the `gym` space, we manually assign these attributes 
-    envs.single_observation_space = envs.observation_space
-    envs.single_action_space = envs.action_space
-    envs.is_vector_env = True
-    envs = gym.wrappers.RecordEpisodeStatistics(envs)
+else:
+    # Use Pistonball as the fallback because it relies on zero external C++ dependencies!
+    env = importlib.import_module(f"pettingzoo.butterfly.{args.env_id}").parallel_env(continuous=False)
 
-    # 32 Active Agents feeding into ONE Network Brain!
-    agent = Agent(envs).to(device)
-    optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
+env = ss.color_reduction_v0(env, mode="B") # Grayscale
+env = ss.resize_v1(env, x_size=84, y_size=84)
+env = ss.frame_stack_v1(env, 4)
+env = ss.pettingzoo_env_to_vec_env_v1(env)
+envs = ss.concat_vec_envs_v1(env, args.num_envs, num_cpus=0, base_class="gymnasium")
 
-    # NOTE: The actual batch size running through our `get_action_and_value` 
-    # will literally be 32 distinct state images!
-    # args.num_envs is the physical parallel games instances. PettingZoo gives 2 agents per game.
-    total_physical_agents = args.num_envs * 2 
-    
-    obs = torch.zeros((args.num_steps, total_physical_agents) + envs.single_observation_space.shape).to(device)
-    actions = torch.zeros((args.num_steps, total_physical_agents) + envs.single_action_space.shape).to(device)
-    logprobs = torch.zeros((args.num_steps, total_physical_agents)).to(device)
-    rewards = torch.zeros((args.num_steps, total_physical_agents)).to(device)
-    dones = torch.zeros((args.num_steps, total_physical_agents)).to(device)
-    values = torch.zeros((args.num_steps, total_physical_agents)).to(device)
+envs.single_observation_space = envs.observation_space
+envs.single_action_space = envs.action_space
+envs.is_vector_env = True
 
-    # Standard PPO Rollout math
-    batch_size = int(total_physical_agents * args.num_steps)
-    minibatch_size = int(batch_size // args.num_minibatches)
-    num_updates = args.total_timesteps // batch_size
+# Native Gym Return Wrapper substitute for custom wrappers issue
+# Pistonball has 20 agents originally, Supersuit flattens
+TOTAL_PARALLEL_AGENTS = envs.num_envs
+episodic_returns = np.zeros(TOTAL_PARALLEL_AGENTS, dtype=np.float32)
 
-    global_step = 0
-    next_obs = torch.Tensor(envs.reset()).to(device)
-    
-    # Because SuperSuit ensures it outputs channel last sometimes (H,W,C), we permute to (C,H,W)
-    if len(next_obs.shape) == 4 and next_obs.shape[-1] in [1,3,4]:
-        next_obs = next_obs.permute((0, 3, 1, 2))
+agent = Agent(envs).to(device)
+optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
+
+obs = torch.zeros((args.num_steps, TOTAL_PARALLEL_AGENTS) + envs.single_observation_space.shape).to(device)
+actions = torch.zeros((args.num_steps, TOTAL_PARALLEL_AGENTS) + envs.single_action_space.shape).to(device)
+logprobs = torch.zeros((args.num_steps, TOTAL_PARALLEL_AGENTS)).to(device)
+rewards = torch.zeros((args.num_steps, TOTAL_PARALLEL_AGENTS)).to(device)
+dones = torch.zeros((args.num_steps, TOTAL_PARALLEL_AGENTS)).to(device)
+values = torch.zeros((args.num_steps, TOTAL_PARALLEL_AGENTS)).to(device)
+
+global_step = 0
+start_time = time.time()
+next_obs_numpy, _ = envs.reset()
+next_obs = torch.tensor(next_obs_numpy).to(device)
+next_done = torch.zeros(TOTAL_PARALLEL_AGENTS).to(device)
+
+for update in range(1, num_updates + 1):
+    frac = 1.0 - (update - 1.0) / num_updates
+    optimizer.param_groups[0]["lr"] = frac * args.learning_rate
+
+    for step in range(0, args.num_steps):
+        global_step += TOTAL_PARALLEL_AGENTS
+        obs[step] = next_obs
+        dones[step] = next_done
+
+        with torch.no_grad():
+            action, logprob, _, value = agent.get_action_and_value(next_obs)
+            values[step] = value.flatten()
+        actions[step] = action
+        logprobs[step] = logprob
+
+        # ENV STEP (Gymnasium tuple format via super-suit)
+        next_obs_np, reward, term, trunc, info = envs.step(action.cpu().numpy())
+        done = np.logical_or(term, trunc)
         
-    next_done = torch.zeros(total_physical_agents).to(device)
+        episodic_returns += reward
+        for i, d in enumerate(done):
+            if d:
+                # Log when an agent completes a multi-agent episode!
+                if update % 5 == 0 and i == 0:
+                    print(f"global_step={global_step}, selfplay_ep_return={episodic_returns[i]}")
+                episodic_returns[i] = 0
 
-    # ... The rest of the PPO Training loop is identically mathematically! ...
-    # The PPO network has no idea it is optimizing a multi-agent game. 
-    # It just optimizes actions based on the images.
+        rewards[step] = torch.tensor(reward).to(device).view(-1)
+        next_obs, next_done = torch.tensor(next_obs_np).to(device), torch.tensor(done, dtype=torch.float32).to(device)
+
+    with torch.no_grad():
+        next_value = agent.get_value(next_obs).reshape(1, -1)
+        advantages = torch.zeros_like(rewards).to(device)
+        lastgaelam = 0
+        for t in reversed(range(args.num_steps)):
+            if t == args.num_steps - 1:
+                nextnonterminal = 1.0 - next_done
+                nextvalues = next_value
+            else:
+                nextnonterminal = 1.0 - dones[t + 1]
+                nextvalues = values[t + 1]
+            delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
+            advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
+        returns = advantages + values
+
+    b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
+    b_logprobs = logprobs.reshape(-1)
+    b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
+    b_advantages = advantages.reshape(-1)
+    b_returns = returns.reshape(-1)
+    b_values = values.reshape(-1)
+
+    b_inds = np.arange(args.batch_size)
+    for epoch in range(args.update_epochs):
+        np.random.shuffle(b_inds)
+        for start in range(0, args.batch_size, args.minibatch_size):
+            end = start + args.minibatch_size
+            mb_inds = b_inds[start:end]
+
+            _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
+            logratio = newlogprob - b_logprobs[mb_inds]
+            ratio = logratio.exp()
+
+            mb_advantages = b_advantages[mb_inds]
+            mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+
+            pg_loss1 = -mb_advantages * ratio
+            pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
+            pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+
+            newvalue = newvalue.view(-1)
+            v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
+
+            entropy_loss = entropy.mean()
+            loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+
+            optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+            optimizer.step()
+
+    if update % 25 == 0:
+        print(f"Iteration {update}/{num_updates}, SPS: {int(global_step / (time.time() - start_time))}")
+
+print("✅ Multi-Agent Self-Play Tutorial Completed!")

@@ -74,14 +74,23 @@ class Agent(nn.Module):
         self.critic = layer_init(nn.Linear(512, 1), std=1)
 
     def get_value(self, x):
-        x = x.clone()
-        x[:, :, :, [0, 1, 2, 3]] /= 255.0
-        return self.critic(self.network(x.permute((0, 3, 1, 2))))
+        x = x.clone().float()
+        # Envpool format is (B, C, H, W) natively sometimes depending on wrappers
+        if x.shape[-1] == 4: # Typical BHWC
+            x[:, :, :, [0, 1, 2, 3]] /= 255.0
+            x = x.permute((0, 3, 1, 2))
+        else:
+            x /= 255.0
+        return self.critic(self.network(x))
 
     def get_action_and_value(self, x, action=None):
-        x = x.clone()
-        x[:, :, :, [0, 1, 2, 3]] /= 255.0
-        hidden = self.network(x.permute((0, 3, 1, 2)))
+        x = x.clone().float()
+        if x.shape[-1] == 4: # Typical BHWC
+            x[:, :, :, [0, 1, 2, 3]] /= 255.0
+            x = x.permute((0, 3, 1, 2))
+        else:
+            x /= 255.0
+        hidden = self.network(x)
         logits = self.actor(hidden)
         probs = Categorical(logits=logits)
         if action is None:
@@ -105,7 +114,14 @@ values = torch.zeros((NUM_STEPS, NUM_ENVS)).to(device)
 start_time = time.time()
 global_step = 0
 
-next_obs = torch.Tensor(envs.reset()).to(device)
+# In newer envpool, reset doesn't always return the info dictionary in standard formats
+next_obs_tmp = envs.reset()
+if isinstance(next_obs_tmp, tuple):
+    next_obs_numpy = next_obs_tmp[0]
+else:
+    next_obs_numpy = next_obs_tmp
+
+next_obs = torch.tensor(next_obs_numpy).to(device)
 next_done = torch.zeros(NUM_ENVS).to(device)
 
 
@@ -126,9 +142,18 @@ for iteration in range(1, NUM_ITERATIONS + 1):
         actions[step] = action
         logprobs[step] = logprob
 
-        # ENVPOOL Execution: envpool returns a batched float array directly.
-        # It's zero-copy memory native in C++
-        next_obs, reward, done, info = envs.step(action.cpu().numpy())
+        # ENVPOOL Execution
+        step_result = envs.step(action.cpu().numpy())
+        if len(step_result) == 4:
+            next_obs_tmp, reward, done, info = step_result
+        else:
+            next_obs_tmp, reward, term, trunc, info = step_result
+            done = term | trunc
+            
+        if isinstance(next_obs_tmp, tuple):
+            next_obs_numpy = next_obs_tmp[0]
+        else:
+            next_obs_numpy = next_obs_tmp
         
         # Logging Episode Lengths/Rewards from the flattened 'info' dictionary
         # In multi-agent envs/Gym, 'info' is usually a List[Dict]. EnvPool returns Dict[BatchArray].
@@ -141,8 +166,10 @@ for iteration in range(1, NUM_ITERATIONS + 1):
                     print(f"global_step={global_step}, ep_return={info['reward'][i]}")
 
         # Move to GPU
+        # In EnvPool flat numpy structure
         rewards[step] = torch.tensor(reward).to(device).view(-1)
-        next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
+        next_obs = torch.tensor(next_obs_numpy).to(device)
+        next_done = torch.tensor(done).float().to(device)
 
     # ----------------
     # 4. GAE & Learning
