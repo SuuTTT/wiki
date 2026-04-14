@@ -190,6 +190,7 @@ if __name__ == "__main__":
         # Collect 128 Steps recursively
         for step in range(0, args.num_steps):
             global_step += args.num_envs
+            tracker.global_step = global_step
             obs[step] = next_obs
             dones[step] = next_done
 

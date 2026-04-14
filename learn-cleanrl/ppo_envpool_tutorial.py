@@ -135,6 +135,8 @@ for iteration in range(1, NUM_ITERATIONS + 1):
 
     for step in range(0, NUM_STEPS):
         global_step += 1 * NUM_ENVS
+        # BUGFIX: Explicitly mapping global_step to the RLTracker so the x-axis advances horizontally in Tensorboard recordings
+        tracker.global_step = global_step
         obs[step] = next_obs
         dones[step] = next_done
 

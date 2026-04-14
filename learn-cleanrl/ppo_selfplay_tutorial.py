@@ -33,9 +33,6 @@ class Args:
     max_grad_norm: float = 0.5
 
 args = Args()
-args.batch_size = int(args.num_envs * args.num_steps)
-args.minibatch_size = int(args.batch_size // args.num_minibatches)
-num_updates = args.total_timesteps // args.batch_size
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     torch.nn.init.orthogonal_(layer.weight, std)
@@ -82,6 +79,7 @@ class Agent(nn.Module):
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy(), self.critic(hidden)
 
+# BUGFIX: Hardcoded "ppo_selfplay" as the experiment name to bypass the AttributeError caused by missing Arg config
 tracker = RLTracker("ppo_selfplay", args.seed)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -104,6 +102,12 @@ envs.is_vector_env = True
 # Native Gym Return Wrapper substitute for custom wrappers issue
 # Pistonball has 20 agents originally, Supersuit flattens
 TOTAL_PARALLEL_AGENTS = envs.num_envs
+# BUGFIX: Calculate args.batch_size AFTER instantiating TOTAL_PARALLEL_AGENTS (160) rather than standard envs (8)
+# This prevents num_updates from under-evaluating by 20x and running endlessly beyond 1M frames!
+args.batch_size = int(TOTAL_PARALLEL_AGENTS * args.num_steps)
+args.minibatch_size = int(args.batch_size // args.num_minibatches)
+num_updates = args.total_timesteps // args.batch_size
+
 episodic_returns = np.zeros(TOTAL_PARALLEL_AGENTS, dtype=np.float32)
 
 agent = Agent(envs).to(device)
@@ -128,6 +132,8 @@ for update in range(1, num_updates + 1):
 
     for step in range(0, args.num_steps):
         global_step += TOTAL_PARALLEL_AGENTS
+        # BUGFIX: Map actual environment frames to the RLTracker to resolve the x=0 vertical grouping bug
+        tracker.global_step = global_step
         obs[step] = next_obs
         dones[step] = next_done
 
@@ -203,7 +209,7 @@ for update in range(1, num_updates + 1):
             nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
             optimizer.step()
 
-    if update % 25 == 0:
+    if True:
         tracker.global_step = global_step
         tracker.log_sps()
         tracker.log_metrics("losses", {"value_loss": v_loss.item(), "policy_loss": pg_loss.item(), "entropy": entropy_loss.item()})

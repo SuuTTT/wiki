@@ -456,6 +456,8 @@ if __name__ == "__main__":
 
             if global_step % 100 == 0:
                 writer.add_scalar("losses/td_loss", loss.item(), global_step)
+                # BUGFIX: Rainbow generates probability distributions (PMFs) via its Distributional layers instead of scalar Q-Values.
+                # To log comparable Q-Values to Tensorboard, we multiply the network support bins by their distribution probability.
                 q_values = (old_pmfs * target_network.support).sum(dim=1).mean()
                 writer.add_scalar("losses/q_values", q_values.item(), global_step)
                 tracker.global_step = global_step

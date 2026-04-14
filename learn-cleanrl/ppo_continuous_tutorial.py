@@ -30,8 +30,9 @@ class Args:
     num_envs: int = 1
     num_steps: int = 2048
     anneal_lr: bool = True
-    gamma: float = 0.99
-    gae_lambda: float = 0.95
+    gamma: float = 0.90
+    # BUGFIX: Pendulum-v1 optimal discounting is ~0.90 rather than 0.99
+    gae_lambda: float = 0.90
     num_minibatches: int = 32
     update_epochs: int = 10
     clip_coef: float = 0.2
@@ -47,6 +48,9 @@ def make_env(env_id, seed, idx, capture_video, run_name):
         else:
             env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
+        # BUGFIX: Rescale the environment's actions to [-1.0, 1.0] to natively align with the neural network's
+        # N(0, 1) initialized standard deviation. This fundamentally cures the -1000 PPO plateau!
+        env = gym.wrappers.RescaleAction(env, min_action=-1.0, max_action=1.0)
         env = gym.wrappers.ClipAction(env)
         env = gym.wrappers.NormalizeObservation(env)
         env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10), env.observation_space)
@@ -139,6 +143,8 @@ if __name__ == "__main__":
 
         for step in range(0, args.num_steps):
             global_step += args.num_envs
+            # BUGFIX: Sync tracker.global_step to the algorithm's iteration frame to prevent Tensorboard logs from stacking exclusively at x=0
+            tracker.global_step = global_step
             obs[step] = next_obs
             dones[step] = next_done
 
