@@ -269,3 +269,23 @@ Step 37800 | Return: -124.46
 Step 38000 | Return: -379.73
 Step 38000 | Model: 1.39 | Actor: 85.36 | Critic: 0.96 | KL: 1.06
 Step 38200 | Return: -380.29
+Step 38400 | Return: -127.79
+Step 38500 | Model: 1.47 | Actor: 144.00 | Critic: 1.27 | KL: 1.09
+Step 38600 | Return: -393.25
+Step 38800 | Return: -267.16
+Step 39000 | Return: -392.22
+Step 39000 | Model: 1.55 | Actor: 155.46 | Critic: 0.95 | KL: 1.12
+Step 39200 | Return: -254.54
+Step 39400 | Return: -131.10
+Step 39500 | Model: 1.56 | Actor: 163.87 | Critic: 1.42 | KL: 1.14
+Step 39600 | Return: -125.68
+Step 39800 | Return: -125.71
+Step 40000 | Return: -129.74
+Step 40000 | Model: 1.63 | Actor: 136.04 | Critic: 0.89 | KL: 1.17
+Step 40200 | Return: -499.61
+Step 40400 | Return: -263.30
+Step 40500 | Model: 1.43 | Actor: 112.38 | Critic: 1.00 | KL: 1.10
+Step 40600 | Return: -120.79
+Step 40800 | Return: -264.20
+Step 41000 | Return: -126.72
+Step 41000 | Model: 1.47 | Actor: 205.43 | Critic: 1.05 | KL: 1.09
