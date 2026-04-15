@@ -22,3 +22,7 @@
 ### DreamerV2 / V3 Path Derivative vs. REINFORCE Fixes
 - **Discrete Actor Gradients**: In `05_dreamer_v2_atari.py`, shifted the discrete Actor from Gumbel-Softmax Straight-Through proxies to a proper **REINFORCE** estimator with baseline advantage centering. Continuous controls in V1/V3 safely use Path Derivative, but Discrete controls must use REINFORCE to prevent divergence and allow `Pong-v5` to solve rather than guessing random values indefinitely.
 - **Training Epoch Expansion**: Discovered that scripts were incorrectly truncating around ~100k steps or doing toy 500-step training cycles. Rewrote the `06_dreamer_v3.py` training sequence to execute a physical environment data-collection loop alongside periodic gradient updates. Adjusted `total_steps` dynamically: **1,000,000 Steps** for continuous tasks (`04_dreamer_v1`, `06_dreamer_v3`) and **50,000,000 Frames** for Atari targets (`05_dreamer_v2`) mirroring the exact scale configurations of the original implementations.
+
+### Known Issues (V1 & V2) - 2026-04-15
+- **DreamerV1 (04_dreamer_v1.py)**: The return converges prematurely to -90. KL loss collapses to ~1e-5, indicating posterior collapse (the model ignores the encoder and only relies on the prior).
+- **DreamerV2 Atari (05_dreamer_v2_atari.py)**: The return plateaus at -21 (the worst possible score in Pong). Actor, reconstruction, and reward losses tend towards zero, meaning gradients shrink but no actual useful policy or dynamics are learned.

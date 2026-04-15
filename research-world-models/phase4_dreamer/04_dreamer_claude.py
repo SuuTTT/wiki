@@ -634,6 +634,8 @@ if __name__ == "__main__":
     # Per-episode RSSM state — reset when episode ends
     h_t = torch.zeros(1, args.deter_size, device=device)
     s_t = torch.zeros(1, args.stoch_size,  device=device)
+    prev_action_online = torch.zeros(1, action_dim, device=device)  # track actual prev action
+    last_ep_ret = float('nan')  # for display between episodes
 
     pbar = tqdm.tqdm(total=args.total_steps, initial=global_step,
                      desc="DreamerV1", unit="step")
@@ -655,7 +657,7 @@ if __name__ == "__main__":
                           "stoch": s_t, "deter": h_t}
             post, _    = rssm.obs_step(
                 prev_state,
-                torch.zeros(1, action_dim, device=device),   # dummy prev_action
+                prev_action_online,   # actual previous action (not dummy zeros)
                 embed,
             )
             h_t, s_t = post["deter"], post["stoch"]
@@ -667,6 +669,7 @@ if __name__ == "__main__":
             action = torch.clamp(
                 action + args.expl_amount * torch.randn_like(action), -1.0, 1.0
             )
+            prev_action_online = action  # save for next RSSM step
             action_np = action.cpu().numpy()[0]
 
         next_obs_np, reward, terminated, truncated, info = env.step(action_np)
@@ -681,10 +684,14 @@ if __name__ == "__main__":
         steps_since_train += 1
         tracker.step(1)
         pbar.update(1)
+        # Update tqdm display every step (not just on episode end)
+        if global_step % 100 == 0:
+            pbar.set_postfix({"ep_ret": f"{last_ep_ret:.1f}", "buf_eps": len(replay)})
 
         if done:
             ep_return = float(sum(ep_rew))
             ep_length = len(ep_rew)
+            last_ep_ret = ep_return
             tracker.log_episode(ep_return, ep_length)
             pbar.set_postfix({"ep_ret": f"{ep_return:.1f}", "buf_eps": len(replay)})
 
@@ -698,6 +705,7 @@ if __name__ == "__main__":
             ep_act, ep_rew = [], []
             h_t = torch.zeros(1, args.deter_size, device=device)
             s_t = torch.zeros(1, args.stoch_size,  device=device)
+            prev_action_online = torch.zeros(1, action_dim, device=device)
 
         # ── 2. TRAINING CYCLE ─────────────────────────────────────────────────
         #  Every train_every env steps: run train_steps gradient updates.
@@ -763,12 +771,19 @@ if __name__ == "__main__":
             target_imgs     = b_obs.reshape(B * T, *b_obs.shape[2:])      # (N,3,64,64)
             recon_loss      = F.mse_loss(recon, target_imgs)
 
-            pred_reward     = reward_model(feats).squeeze(-1)              # (N,)
-            reward_loss     = F.mse_loss(pred_reward, b_rew.reshape(B * T))
+            # Reward off-by-one fix: feat at time t encodes the transition
+            # caused by prev_action (= action_{t-1}), so it should predict
+            # reward_{t-1} (the reward observed upon arrival at state t).
+            # Skip t=0 (no meaningful prev_action) and use feats[1:] → rewards[:-1]
+            all_feats_BT    = torch.cat([posts["deter"], posts["stoch"]], dim=-1)  # (B,T,F)
+            reward_feats    = all_feats_BT[:, 1:].reshape(B * (T - 1), -1)  # skip t=0
+            pred_reward     = reward_model(reward_feats).squeeze(-1)         # (B*(T-1),)
+            reward_loss     = F.mse_loss(pred_reward, b_rew[:, :-1].reshape(B * (T - 1)))
 
             post_dist       = Normal(posts["mean"],  posts["std"])
             prior_dist      = Normal(priors["mean"], priors["std"])
             kl              = kl_divergence(post_dist, prior_dist).sum(-1) # (B, T)
+            kl_raw          = kl.mean()  # for logging (before free_nats clamp)
             kl_loss         = torch.clamp(kl, min=args.free_nats).mean()
 
             model_loss = args.kl_scale * kl_loss + recon_loss + reward_loss
@@ -795,9 +810,13 @@ if __name__ == "__main__":
             #  λ=0.95: mixes TD(0) (low variance, high bias) with
             #          Monte Carlo  (high variance, low bias).
             # ═══════════════════════════════════════════════════════════════════
-            init_state = {k: v.reshape(B * T, -1).detach()
-                          for k, v in posts.items()}   # stop grads from world model
-            N = B * T
+            # Subsample starting states for imagination to improve speed.
+            # Using every 4th timestep instead of all B*T gives ~4x speedup on
+            # Phase 2/3 with minimal loss of diversity.
+            flat_posts = {k: v.reshape(B * T, -1).detach() for k, v in posts.items()}
+            imag_indices = torch.randperm(B * T, device=device)[:B * T // 4]
+            init_state = {k: v[imag_indices] for k, v in flat_posts.items()}
+            N = init_state["deter"].shape[0]
 
             # Imagine H steps forward (returns dict of (H, N, dim))
             imag_states  = rssm.imagine(actor_model, init_state, args.horizon)
@@ -847,12 +866,13 @@ if __name__ == "__main__":
 
         # ── Log losses ────────────────────────────────────────────────────────
         tracker.log_metrics("losses", {
-            "kl":     kl_loss.item(),
-            "recon":  recon_loss.item(),
-            "reward": reward_loss.item(),
-            "model":  model_loss.item(),
-            "actor":  actor_loss.item(),
-            "value":  value_loss.item(),
+            "kl":       kl_loss.item(),
+            "kl_raw":   kl_raw.item(),
+            "recon":    recon_loss.item(),
+            "reward":   reward_loss.item(),
+            "model":    model_loss.item(),
+            "actor":    actor_loss.item(),
+            "value":    value_loss.item(),
         })
         tracker.log_sps()
 
