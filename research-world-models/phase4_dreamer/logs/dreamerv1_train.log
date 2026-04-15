@@ -1,0 +1,36 @@
+nohup: ignoring input
+Initializing DreamerV1 on CarRacing-v2
+Logging to benchmark/04_dreamer_v1/2026-04-15-1776216842
+Pre-filling buffer...
+Step 1499 | Return: -71.83
+Step 2499 | Return: -58.60
+Step 3499 | Return: -58.76
+Step 4499 | Return: -50.88
+Step 5499 | Return: -30.23
+Step 6499 | Return: -50.53
+Step 7499 | Return: -33.10
+Step 8499 | Return: -22.30
+Step 9499 | Return: -78.26
+Step 10499 | Return: -69.35
+Step 11499 | Return: -76.30
+Step 12499 | Return: -82.20
+Step 13499 | Return: -82.52
+Step 14499 | Return: -78.02
+Step 15499 | Return: -77.01
+Step 16499 | Return: -82.27
+Step 17499 | Return: -84.66
+Step 18499 | Return: -69.14
+Step 19499 | Return: -43.26
+Step 20499 | Return: -58.33
+Step 21499 | Return: -66.29
+Step 22499 | Return: -74.36
+Step 23499 | Return: -83.61
+Step 24499 | Return: -87.90
+Step 25499 | Return: -93.51
+Step 26499 | Return: -92.88
+Step 27499 | Return: -93.57
+Step 28499 | Return: -92.09
+Step 29499 | Return: -93.71
+Step 30499 | Return: -90.10
+Step 31499 | Return: -89.21
+Step 32499 | Return: -87.77

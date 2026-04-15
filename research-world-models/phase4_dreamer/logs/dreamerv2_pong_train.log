@@ -1,0 +1,27 @@
+nohup: ignoring input
+Initializing DreamerV2 on Pong-v5 (Discrete Controls, KL Balancing)
+Logging to benchmark/05_dreamer_v2_atari/2026-04-15-1776216852
+Pre-filling buffer...
+Step 1363 | Return: -20.00
+Step 2258 | Return: -20.00
+Step 3039 | Return: -21.00
+Step 4001 | Return: -19.00
+Step 4820 | Return: -21.00
+Step 5668 | Return: -21.00
+Step 6534 | Return: -20.00
+Step 7358 | Return: -21.00
+Step 8233 | Return: -20.00
+Step 9307 | Return: -20.00
+Step 10256 | Return: -21.00
+Step 11187 | Return: -21.00
+Step 11976 | Return: -21.00
+Step 12812 | Return: -20.00
+Step 13602 | Return: -21.00
+Step 14510 | Return: -21.00
+Step 15333 | Return: -21.00
+Step 16166 | Return: -20.00
+Step 17004 | Return: -21.00
+Step 17828 | Return: -21.00
+Step 18592 | Return: -21.00
+Step 19377 | Return: -21.00
+Step 20196 | Return: -21.00

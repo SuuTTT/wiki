@@ -1,0 +1,14 @@
+nohup: ignoring input
+Gym has been unmaintained since 2022 and does not support NumPy 2.0 amongst other critical functionality.
+Please upgrade to Gymnasium, the maintained drop-in replacement of Gym, or contact the authors of your software and request that they upgrade.
+Users of this version of Gym should be able to simply replace 'import gym' with 'import gymnasium as gym' in the vast majority of cases.
+See the migration guide at https://gymnasium.farama.org/introduction/migration_guide/ for additional information.
+Initializing Real DreamerV3 on cuda (Pendulum-v1)...
+Logging to benchmark/06_dreamer_v3/2026-04-15-1776216862
+Warming up buffer...
+/venv/main/lib/python3.12/site-packages/gym/utils/passive_env_checker.py:233: DeprecationWarning: `np.bool8` is a deprecated alias for `np.bool_`.  (Deprecated NumPy 1.24)
+  if not isinstance(terminated, (bool, np.bool8)):
+Starting Training Loop...
+Step 1200 | Return: -1334.97
+Step 1400 | Return: -968.93
+Step 1500 | Model: 2.11 | Actor: 50.34 | Critic: 2.03 | KL: 1.32
