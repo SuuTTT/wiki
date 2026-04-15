@@ -2,3 +2,4 @@
 *.pth
 events.out.tfevents.*
 *.pdf
+*.log

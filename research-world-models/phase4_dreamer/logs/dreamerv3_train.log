@@ -289,3 +289,5 @@ Step 40600 | Return: -120.79
 Step 40800 | Return: -264.20
 Step 41000 | Return: -126.72
 Step 41000 | Model: 1.47 | Actor: 205.43 | Critic: 1.05 | KL: 1.09
+Step 41200 | Return: -127.90
+Step 41400 | Return: -124.48
