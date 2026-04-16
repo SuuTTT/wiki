@@ -3,3 +3,6 @@
 events.out.tfevents.*
 *.pdf
 *.log
+
+*/repo/*
+learn_mujoco_playground/repo
