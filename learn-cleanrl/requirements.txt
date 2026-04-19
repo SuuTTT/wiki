@@ -13,3 +13,4 @@ tensorboard>=2.14.0
 pygame>=2.5.0
 opencv-python>=4.8.0
 tqdm>=4.66.0
+tyro>=0.5.17
