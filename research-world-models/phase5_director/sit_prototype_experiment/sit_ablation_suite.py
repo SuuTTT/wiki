@@ -11,6 +11,7 @@ import community as community_louvain
 import time
 import os
 from collections import deque
+import argparse
 
 # 4x4 Deterministic Map
 MAP = ["SFFF", "FHFH", "FFFH", "HFFG"]
@@ -39,10 +40,10 @@ class AC(nn.Module):
         self.net = nn.Sequential(nn.Linear(n_in, 64), nn.ReLU(), nn.Linear(64, n_out), nn.Softmax(-1))
         self.val = nn.Sequential(nn.Linear(n_in, 64), nn.ReLU(), nn.Linear(64, 1))
 
-def train(episodes=2000):
-    run_name = f"sit_v3_run_{int(time.time())}"
+def train(episodes=1500, cfg=None):
+    run_name = f"ablation_{cfg['name']}_{int(time.time())}"
     writer = SummaryWriter(f"logs/{run_name}")
-    print(f"Logging to TensorBoard: {run_name}")
+    print(f"Starting Ablation: {cfg['name']}")
     
     env = make_env()
     graph = GraphTracker(16)
@@ -51,8 +52,6 @@ def train(episodes=2000):
     w_opt = optim.Adam(worker.parameters(), 1e-3)
     m_opt = optim.Adam(manager.parameters(), 5e-4)
     
-    start_time = time.time()
-    global_step = 0
     recent_rewards = deque(maxlen=100)
     
     for ep in range(episodes):
@@ -67,14 +66,13 @@ def train(episodes=2000):
         target = dist.sample()
         
         steps = 0
-        total_ir = 0
-        while not done and steps < 100:
+        while not done and steps < 60:
             g_oh = torch.eye(8)[target]
             w_in = torch.cat([s_oh, g_oh])
             w_probs, w_val = worker.net(w_in), worker.val(w_in)
             
-            # Action: Epsilon-greedy exploration
-            epsilon = max(0.1, 0.8 - ep/1000)
+            # Epsilon strategy
+            epsilon = max(0.1, cfg['eps_start'] - ep/cfg['eps_decay']) if cfg['use_eps'] else 0.0
             if np.random.rand() < epsilon:
                 action = torch.tensor(np.random.randint(4))
             else:
@@ -83,19 +81,18 @@ def train(episodes=2000):
             ns, r, term, trunc, _ = env.step(action.item())
             done = term or trunc
             steps += 1
-            global_step += 1
-            
             graph.update_edge(s, ns)
             ns_cl = graph.clusters.get(ns, 0)
             curr_cl = graph.clusters.get(s, 0)
             
-            # FIX: Lower intrinsic reward to prevent boundary-hopping obsession
-            ir = 0.2 if ns_cl == target.item() and curr_cl != target.item() else -0.01
-            total_ir += ir
-            w_hist.append((w_val, Categorical(w_probs).log_prob(action), ir + r)) # Worker sees extrinsics too!
+            # Intrinsic reward
+            ir = cfg['ir_scale'] if ns_cl == target.item() and curr_cl != target.item() else -0.01
+            # Mixed reward for worker?
+            w_r = ir + (r if cfg['worker_ext'] else 0)
+            
+            w_hist.append((w_val, Categorical(w_probs).log_prob(action), w_r))
             
             if ns_cl != curr_cl or ir > 0.1 or done:
-                # Manager reward: Success bonus + Goal bonus
                 r_m = float(r) * 10.0 + (1.0 if ir > 0.1 else 0)
                 m_hist.append((m_val, dist.log_prob(target), r_m))
                 s_oh = torch.eye(16)[ns]
@@ -108,11 +105,10 @@ def train(episodes=2000):
             tot_rew += r
 
         # Optimize
-        for hist, opt, coef in [(w_hist, w_opt, 0.1), (m_hist, m_opt, 0.5)]:
+        for hist, opt in [(w_hist, w_opt), (m_hist, m_opt)]:
             if not hist: continue
             vals, logs, rews = zip(*hist)
-            vals = torch.stack(vals).squeeze()
-            if vals.dim() == 0: vals = vals.unsqueeze(0)
+            vals = torch.stack(vals).squeeze().view(-1)
             R = []
             curr_r = 0
             for r in reversed(rews):
@@ -120,37 +116,31 @@ def train(episodes=2000):
                 R.insert(0, curr_r)
             R = torch.tensor(R, dtype=torch.float32)
             adv = R - vals.detach()
-            
-            # FIX: Scale value loss down heavily
-            loss = -(torch.stack(logs) * adv).mean() + coef * F.mse_loss(vals, R)
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
-            
-            if opt == w_opt: w_loss_val = loss.item()
-            else: m_loss_val = loss.item()
+            loss = -(torch.stack(logs) * adv).mean() + 0.1 * F.mse_loss(vals, R)
+            opt.zero_grad(); loss.backward(); opt.step()
 
-        if ep % 10 == 0:
-            num_cl = graph.run_sit_optimization()
-            writer.add_scalar("SIT/Clusters", num_cl, ep)
-
+        if ep % 10 == 0: graph.run_sit_optimization()
         recent_rewards.append(tot_rew)
         avg_rew = np.mean(recent_rewards)
-        sps = int(global_step / (max(0.01, time.time() - start_time)))
-
-        writer.add_scalar("charts/extrinsic_reward", tot_rew, ep)
         writer.add_scalar("charts/episodic_return", avg_rew, ep)
-        writer.add_scalar("charts/intrinsic_reward", total_ir, ep)
-        writer.add_scalar("charts/SPS", sps, ep)
-        writer.add_scalar("losses/worker_loss", w_loss_val, ep)
-        writer.add_scalar("losses/manager_loss", m_loss_val, ep)
-        
-        if ep % 100 == 0:
-            print(f"Ep {ep} | AvgRew: {avg_rew:.2f} | SPS: {sps} | SIT: {len(set(graph.clusters.values()))}")
+        if ep % 500 == 0: print(f"  {cfg['name']} Ep {ep}: AvgRew {avg_rew:.2f}")
 
     writer.close()
-    return run_name
+    return avg_rew
 
 if __name__ == "__main__":
-    run_id = train(2000)
-    print(f"Done. Run ID: {run_id}")
+    experiments = [
+        {"name": "full_system", "use_eps": True, "eps_start": 0.8, "eps_decay": 1000, "ir_scale": 0.2, "worker_ext": True},
+        {"name": "no_epsilon", "use_eps": False, "eps_start": 0.0, "eps_decay": 1000, "ir_scale": 0.2, "worker_ext": True},
+        {"name": "no_worker_ext", "use_eps": True, "eps_start": 0.8, "eps_decay": 1000, "ir_scale": 0.2, "worker_ext": False},
+        {"name": "high_ir_1.0", "use_eps": True, "eps_start": 0.8, "eps_decay": 1000, "ir_scale": 1.0, "worker_ext": True},
+    ]
+    
+    results = {}
+    for cfg in experiments:
+        final_avg = train(episodes=1200, cfg=cfg)
+        results[cfg['name']] = final_avg
+        
+    print("\n--- Ablation Summary ---")
+    for k, v in results.items():
+        print(f"{k}: Final Avg Reward {v:.2f}")

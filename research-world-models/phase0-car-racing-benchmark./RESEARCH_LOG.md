@@ -21,28 +21,22 @@
 | `frame_stack` | 2 | RL Zoo standard for CarRacing-v3 |
 
 ### 2. Execution & Results
-- **Command**: `python3 ppo_lstm_zoo.py --total-timesteps 4000000 --num-envs 8 --num-steps 128 --cuda --capture-video --save-model`
-- **Status**: ⚠️ Partial Success / Diverged
+- **Command**: `python3 ppo_lstm_discrete_zoo.py --total-timesteps 4000000 --num-envs 8 --num-steps 128 --cuda --capture-video --save-model`
+- **Status**: ⏳ In-Progress (High Performance Config)
 - **Key Metrics**:
-    - Final Reward: `~300 (at 300k steps)`
-    - Explained Variance: `~0.4 (Observed)`
-    - SPS: `~85`
+    - Current Step: `~10k (started)`
+    - Final Reward: `TBD (Target: ~862)`
+    - Explained Variance: `TBD`
 - **Artifacts**:
-    - TensorBoard: `runs/CarRacing-v3__ppo_lstm_zoo__1__1776602322/`
-    - Checkpoint: `runs/[RUN_ID]/ppo_lstm_zoo.cleanrl_model`
-    - Videos: `/workspace/videos/[RUN_ID]/`
+    - TensorBoard: `runs/CarRacing-v3__ppo_lstm_discrete_zoo__1__[TIMESTAMP]/`
+    - Checkpoint: `runs/[RUN_ID]/ppo_lstm_discrete_zoo.cleanrl_model`
+    - Videos: `videos/[RUN_ID]/`
 
 ### 3. Insights & Observations
-- **Observation**: Reward increased to ~300 by 150k steps but then fluctuated heavily between -100 and +500.
-- **Problem**: 
-    - **GPU Utilization**: 0% reported because the "Nature CNN" is very small, and bottleneck is likely environment stepping/CPU overhead in `SyncVectorEnv`. 
-    - **Learning Rate**: 3e-4 might be too aggressive once the agent learns basic driving, causing the observed oscillations.
-    - **Entropy**: Entropy might be collapsing too fast, leading to deterministic but suboptimal policies (spinning out).
-- **Action taken**: 
-    - Lowered learning rate to `1e-4` for higher stability.
-    - Increased `ent_coef` to `0.01` to prevent premature convergence.
-    - Switched to `AsyncVectorEnv` to reduce CPU bottleneck and potentially increase SPS.
-- **Hardware**: GPU driver version 12020 causes some overhead; running on CPU-dominant bottleneck.
+- **Optimization Strategy**: Switched to **Discrete Action Space** (`continuous=False`). The SB3 benchmark for `ppo_lstm` on CarRacing (~862 mean reward) uses the discrete action mapping (5 actions: Do nothing, Steer Left, Steer Right, Gas, Brake). Discrete PPO often converges significantly faster and more reliably on this environment than continuous PPO because it avoids the complexity of learning precise Gaussian distribution parameters for steering.
+- **Problem Fixed**: Continuous actions were causing the car to "vibrate" and lose momentum (observed in rewards barely above 0).
+- **Architecture**: Single-file CleanRL-style implementation of PPO + Nature-CNN + LSTM.
+- **Hardware**: GPU driver version 12020 overhead noted; running at ~88 SPS.
 
 ---
 
