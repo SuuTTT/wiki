@@ -131,12 +131,60 @@ python3 wiki/research-world-models/phase5_director/sit_prototype_experiment/sit_
 
 ---
 
-## 🔬 Next Steps: Continuous Control & Representation Learning
-**Objective**: Transition from discrete grid-worlds to continuous state/action spaces where SIT modules must be discovered from high-dimensional embeddings.
+## 🔬 Iteration 12: Robustness Study (Multi-Map, Multi-Seed)
+**Objective**: Eliminate statistical bias by running a grid-search across 3 maps and 3 seeds to confirm the stability of the "Frozen SIT" hierarchy.
 
-### **Planned Transition Steps**
-1. **VAE/SIT Integration**: Use a VAE to encode continuous states (e.g., CarRacing or Pendulum) into a latent space, and apply SIT clustering on the latent transition graph.
-2. **Action-Conditional SIT**: Explore if clusters should be defined by `(s, a, s')` rather than just `(s, s')` to account for dynamic complexity.
-3. **Environment Scale-up**: Move to `Pendulum-v1` to verify if "angle-velocity" clusters map to intuitive hierarchical phases (e.g., "swing-up" vs "balancing").
+### 1. Results Summary
+**Log Root**: `/workspace/logs/robust_study/`
+
+| Map | Strategy | Mean Reward | Std Dev | TensorBoard Sub-path (Seeds 11, 22, 33) |
+| :--- | :--- | :--- | :--- | :--- |
+| **4x4** | Flat | 0.94 | 0.00 | `robust_4x4_flat_fTrue_s[11/22/33]_...` |
+| **4x4** | Hierarchical | 0.90 | 0.02 | `robust_4x4_hierarchical_fTrue_s[11/22/33]_...` |
+| **8x8** | Flat | 0.96 | 0.01 | `robust_8x8_flat_fTrue_s[11/22/33]_...` |
+| **8x8** | Hierarchical | 0.96 | 0.01 | `robust_8x8_hierarchical_fTrue_s[11/22/33]_...` |
+| **8x8_sparse** | Flat | 1.00 | 0.00 | `robust_8x8_sparse_flat_fTrue_s[11/22/33]_...` |
+| **8x8_sparse** | Hierarchical | 1.00 | 0.00 | `robust_8x8_sparse_hierarchical_fTrue_s[11/22/33]_...` |
+
+### 2. Analytical Conclusion: Why no significant enhancement?
+In these experiments, the Hierarchical agent matched but did not significantly outperform the Flat agent. 
+
+**Root Causes:**
+1. **Saturation of Simplicity**: The `8x8` and `8x8_sparse` environments, while larger than 4x4, are still within the "brute-force" solve range for a well-tuned PPO agent given 2000 episodes. Hierarchy usually shows its strength when the probability of reaching the goal randomly is nearly zero ($P \approx 0$).
+2. **The "Wait-and-See" Tax**: By freezing the Manager for 500 episodes to ensure SIT cluster stability, we effectively turned the hierarchical agent into a flat agent for 25% of the training time. This delay ensures **stability** (near-zero variance) but prevents **acceleration** in environments that are already solvable.
+3. **Reward Density**: Even our "sparse" map is relatively small (64 states). In such spaces, the "hallway" effect of SIT clusters provides structural clarity but isn't strictly necessary for discovery.
+
+**Verdict**: The SIT-Director is now **Statistically Robust** (the main goal of Iteration 12). To see **Enhancement**, we must move to environments where the distance to the goal exceeds the effective horizon of a flat walker (e.g., [Chain environments](wiki/research-world-models/phase5_director/sit_prototype_experiment/RESEARCH_LOG.md) or high-dimensional MuJoCo).
+
+---
+
+## 🔬 Iteration 13: Continuous Control Prototype (Pendulum-v1)
+**Objective**: Test if SIT-clustering translates to continuous state/action spaces using VAE abstraction.
+
+### 1. Architectural Changes (Continuous SIT)
+- **State Representation**: Added a **VAE** to compress 3D observation `(cos, sin, theta_dot)` into 16D latents.
+- **Abstraction**: `LatentGraphTracker` uses quantized latents to build a transition graph and detect communities online.
+- **Policy**: Continuous Actor-Critic ($Normal(\mu, \sigma)$) for the Worker.
+
+### 2. Early Observations
+- **Cluster Evolution**: Initial clusters >2000 (over-segmentation) decreased to **~1250-1400** after 1500 episodes.
+- **Performance**: 
+    - **Pendulum-v1**: -1400 to -900 (High variance, no convergence to balance).
+    - **LunarLander-v3**: -400 to -100 (Unstable; agent crashes or floats).
+
+### 3. Failure Analysis: Why are they not converging?
+Both environments failed to reach basic performance benchmarks (Pendulum needs ~-150, LunarLander needs >200).
+
+**Root Causes:**
+1. **Latent Instability**: Even though cluster counts are slightly lower, **1300+ clusters** for a 3D state space (Pendulum) is extreme over-segmentation. The VAE is likely encoding noise or small variations in `theta_dot`, leading the SIT tracker to create thousands of "micro-rooms." This makes the Manager's job impossible, as it has too many "goals" to choose from.
+2. **Policy Gradient Variance**: My prototype uses a vanilla policy gradient update without clipping (PPO-style). In continuous spaces, large updates can easily "blow out" the policy.
+3. **Observation-Action Noise**: The quantization method for `LatentGraphTracker` ($grid\_size=5$) is too sensitive for continuous spaces. A shift of 0.2 in latent space creates a new identity, whereas $z$ should be treated as a smooth manifold.
+
+### 4. Next Steps & Baseline Correction
+1. **Flat Baseline**: I am currently running `flat_continuous_baseline.py` to see if the core AC architecture *can* solve these tasks. If the flat agent also fails, the issue is with the base RL hyperparameters.
+2. **Smoothing the Latent Graph**: Use **K-Means** or **Agglomerative Clustering** on the VAE latents periodically, rather than grid-based quantization.
+3. **PPO Clip**: Introduce clipping to the Worker to stabilize updates.
+
+
 
 

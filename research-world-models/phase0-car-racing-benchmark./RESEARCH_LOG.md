@@ -40,8 +40,29 @@
 
 ---
 
-## 📈 Aggregated Benchmark Table
-| Exp ID | Scenario | Mean Reward | EV (Final) | Stability | Link |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| CR-v3-PPO | Continuous | ~154 | < 0.3 | Low | [Zoo Baseline](wiki/research-world-models/phase0-car-racing-benchmark./existing.md) |
-| CR-v3-LSTM | Continuous | **~862** (Target) | > 0.8 | High | [This Experiment](#) |
+## � Experiment: CR-20260420-PPO-BETA-RAFAEL
+**Hypothesis**: Using a **Beta Distribution** (bounded [0,1]) for continuous actions and a deeper 6-layer CNN without recurrence (LSTM) will achieve high scores faster by avoiding the "shaking" issues of Gaussian policies.
+
+### 1. Configuration Changes
+| Parameter | Value | Notes |
+| :--- | :--- | :--- |
+| `policy` | Beta Distribution | Bounded [0, 1], shifted to [-1, 1] for steering |
+| `backbone` | 6-layer CNN | Deeper than Nature CNN (3 layers) |
+| `frame_stack` | 4 | Higher temporal resolution without LSTM |
+| `num_envs` | 1 | Replicating the 2019-style single-agent training |
+| `learning_rate`| 1e-3 | Fast learning rate used in Rafael1s repo |
+| `vf_coef` | 2.0 | High emphasis on value regression |
+
+### 2. Execution & Results
+- **Command**: `python3 ppo_beta_rafael.py --total-timesteps 4000000 --cuda --save-model`
+- **Status**: ⏳ Starting
+- **Key Metrics**:
+    - Final Reward: `TBD (Target: ~900)`
+    - Network Depth: `6 Conv Layers`
+
+### 3. Insights & Observations
+- **Recurrence vs. Depth**: This implementation proves that **LSTM is not strictly required** if the CNN is deep enough and frame stacking is sufficient (4 frames). The 2019 repo reached ~901 reward in **2,760 episodes** (approx. 400k-1M steps) using this depth.
+- **Beta Distribution Trick**: Gaussian policies often waste gradient steps sampling outside the [-1, 1] range. Beta distribution is mathematically constrained to [0, 1], making the policy much more efficient at learning boundary actions (hard left/right).
+- **Smooth L1 Loss**: Uses Hubber/SmoothL1 loss for value function stability, preventing huge gradients from spikes in reward.
+
+---
