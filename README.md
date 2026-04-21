@@ -13,7 +13,12 @@ Welcome to the Reinforcement Learning research repository.
 implement all code(tdmpc2, director, SIT) in jax, and test in mujoco playground make it fast enough for agent to get feedback and iterate
 
 ### hardware requirements
+dmcontrol 
+- walker-walk only need 1.7GB
+- halfcheetah 1GPB
 
+mujoco playground
+- panda 12GB
 
 
 ## Current Research Focus

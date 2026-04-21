@@ -51,27 +51,30 @@
     - Buffer Size: `3112 transitions`
 - **Insights**: The "Jumpy-MPC" reached the goal in Episode 50! This proves that the **SIT Topological Pull** can solve sparse reward tasks in long-horizon maps (8x8) where flat agents fail.
 - **Visuals**: Results are now logged to TensorBoard at `/workspace/runs/SIT-TDMPC-8x8`.
-- **Action for next iteration**: Increase `mppi_samples` to 64 and test in CarRacing-v3.
+- **Action for next iteration**: Increase `mppi_samples` to 64 and test in DMControl `walker-walk`.
 
 ---
-## 🔬 Experiment: [CarRacing-v3-Benchmark-20260421-001]
-**Hypothesis**: Scaling MPPI samples to 512 and batch size to 512 will utilize 24GB VRAM and exceed the 433-reward baseline.
+## 🔬 Experiment: [DMControl-SIT-20260421-001]
+**Hypothesis**: Transitioning from slow Pixel environments (CarRacing) to State-based DMControl will accelerate iteration by 10x. Integrating SIT into the latent space of `walker-walk` will lead to more robust state abstractions than pure TD-MPC2.
 
 ### 1. Configuration Changes
 | Parameter | Value | Notes |
 | :--- | :--- | :--- |
-| `batch_size` | 512 | Increased from 32 (Trial 1) |
-| `num_samples` | 512 | Increased from 64 (Trial 1) |
-| `buffer_device` | CUDA:0 | Forced (was CPU fallback) |
-| `use_sit` | False | Pure TD-MPC2 Baseline |
+| `task` | `walker-walk` | State-based observation (24-dim) |
+| `use_sit` | True | Structural Information Theory enabled |
+| `sit_coef` | 0.1 | Weight of topological constraint |
+| `batch_size` | 256 | Reverted from 512 for stability |
 
 ### 2. Execution & Results
-- **Command**: `python train.py ... batch_size=512 num_samples=512`
-- **Status**: ⚠️ Optimization Divergence
+- **Command**: `python train.py task=walker-walk +use_sit=true +sit_coef=0.1`
+- **Status**: 🏁 Baseline Completed | ⏳ SIT Running
 - **Key Metrics**:
-    - Step 100k Reward: `-50.7` (Baseline was `433.8`)
-    - Step 187k Reward: `-35.8`
-- **Diagnosis**: 
-    1. **Sampling/Batch Parity**: Setting `batch_size=512` with a fresh buffer meant the agent was performing 512 updates using a single episode repeatedly, causing massive overfitting to a cold start.
-    2. **Latent Collapse**: Without SIT or large-scale diversity, the world model collapsed under high-batch gradient pressure before finding the track.
-- **Verdict**: The high batch size (512) is "too heavy" for the early exploration phase. Reverting to standard high-performance config (`batch=256`, `samples=512`) for stability.
+    - **TD-MPC2 Baseline**: `990.7 Reward` at 41.5k steps.
+    - **SIT Performance**: TBD
+- **Insights**: Abandoning CarRacing-v3 due to 88 SPS limit; DMControl state-based tasks yield ~500+ SPS, allowing 1M step runs in <1h.
+- **Action for next iteration**: Compare SIT latent graph convergence against standard consistency loss.
+
+---
+## 🔬 Experiment: [CarRacing-v3-Archive-20260421]
+**Hypothesis**: Scaling MPPI samples to 512... (Archived: Environment iteration too slow for research cycle).
+
