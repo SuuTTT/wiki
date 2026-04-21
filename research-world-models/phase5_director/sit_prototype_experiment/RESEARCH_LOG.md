@@ -188,3 +188,57 @@ Both environments failed to reach basic performance benchmarks (Pendulum needs ~
 
 
 
+# Phase 5: Continuous Control Expansion - SIT-Director v2
+
+## 📋 Iteration 13: The "Continuous Control Barrier" (Baseline Failure)
+**Objective**: Transition SIT-Director from 8x8 Gridworlds to high-dimensional control (Pendulum-v1, LunarLander-v3).
+
+### 1. Prototype v1: "The Cluster Explosion"
+- **Method**: VAE Latent Space + Fixed Grid Quantization.
+- **Fail Pattern**: The VAE space was too sensitive. Small changes in joint angles created thousands of unique "micro-rooms" (1,700+ rooms in Pendulum). The Manager couldn't learn a path through a 1,700-node graph.
+- **Result**: No convergence.
+
+### 2. Prototype v2 (Optimized): "Hardware Acceleration"
+- **Method**: Moved all tensors to `cuda`. Replaced fixed grid with `MiniBatchKMeans`.
+- **Finding**: While SIT-v2 ran 10x faster, the **base PPO policy** itself was failing to solve the environments (Pendulum stuck at -1400).
+
+### 3. Stability Benchmark (Current): "The Standard-Rigid PPO"
+- **Method**: Implemented a CleanRL-style PPO with:
+    - GAE ($\lambda=0.95$)
+    - Observation & Reward Normalization
+    - Orthogonal Initialization
+- **The "Small Reward" Confusion**:
+    - Observations showed Rewards of $\approx -10$.
+    - **Discovery**: This is an artifact of `NormalizeReward`.
+    - **Side-by-Side Validation**:
+        - Raw Reward: **-1437** (Failing)
+        - Normalized Reward: **-18** (Appearing stable but not solving)
+- **Problem Diagnosis**: 
+    - The `LunarLander` is crashing with massive negative rewards (`-82272` raw). 
+    - **Root Cause**: The Policy Standard Deviation ($\sigma$) is collapsing too early or not exploring the corrective actions needed for landing. The "smoothness" of the Gaussian policy is hindering the "snappy" responses required for LunarLander.
+
+### 4. Verified Failure Patterns (Global)
+1. **Gaussian Exploration Mismatch**: Independent Gaussian noise works for walking (Pendulum) but fails for coordination (LunarLander).
+2. **Reward Stretching**: Without clipping, a single crash in LunarLander creates a gradient so large it destroys the policy, which the current `NormalizeReward` obscures but doesn't fix.
+
+---
+
+## 📋 Iteration 14: Gap Analysis (SIT-Iteration 13 vs. CleanRL Official)
+**Objective**: Identify missing architectural details in our custom continuous implementation compared to specialized baselines.
+
+### 1. Architectural Differences
+| Feature | SIT-Iteration 13 (Custom) | CleanRL Official (Reference) | Impact Code |
+| :--- | :--- | :--- | :--- |
+| **Observation Normalization** | Simple division (manual) | `gym.wrappers.NormalizeObservation` | Maintains running mean/std. |
+| **Reward Normalization** | Missing or manual | `gym.wrappers.NormalizeReward` | Scales returns to $\approx 1$ scale for stable gradients. |
+| **Layer Initialization** | Default PyTorch | Orthogonal Init (scale dependent) | `torch.nn.init.orthogonal_` |
+| **Entropy Coefficient** | Constant 0.01 | Usually 0.0 for Pendulum | Prevents noise from overwhelming swing-up signal. |
+| **Optimizer Epsilon** | Default ($10^{-8}$) | $1e-5$ | Improves numerical stability for low-variance updates. |
+| **Advantage Norm** | Yes | Yes (Per minibatch) | Both use it. |
+
+### 2. Implementation "Bugs" in Custom PPO
+- **The Wrapper Trap**: We discovered that `gym.wrappers.TransformObservation` in current `gymnasium` versions requires the observation space as an argument if not using the functional lambda style correctly.
+- **Logstd Parameterization**: Iteration 13 used a linear layer for $std$. CleanRL uses a standalone `nn.Parameter` (`actor_logstd = nn.Parameter(torch.zeros(1, n_out))`), which decoupled action noise from input observation—often critical for policy stability in simple environments like Pendulum.
+
+### 3. Immediate Action: The Beta Distribution Hypothesis
+Standard Gaussian PPO (Normal) struggles with Pendulum because it samples heavily from the center. A **Beta** distribution forces exploration at the boundaries of the action space $[-2, 2]$, which is the only way to generate enough torque for a swing-up.

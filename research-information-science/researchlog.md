@@ -54,16 +54,24 @@
 - **Action for next iteration**: Increase `mppi_samples` to 64 and test in CarRacing-v3.
 
 ---
-## 🔬 Experiment: [SIT-INTRINSIC-20260420-002]
-**Hypothesis**: Giving the agent an intrinsic reward ($+0.1$) for crossing SIT-discovered module boundaries will drive exploration beyond the initial spawn cluster in 8x8 maps.
+## 🔬 Experiment: [CarRacing-v3-Benchmark-20260421-001]
+**Hypothesis**: Scaling MPPI samples to 512 and batch size to 512 will utilize 24GB VRAM and exceed the 433-reward baseline.
 
 ### 1. Configuration Changes
 | Parameter | Value | Notes |
 | :--- | :--- | :--- |
-| `intrinsic_reward_scale` | 0.1 | Bonus for parent-node change in Encoding Tree |
-| `sit_update_freq` | 50 episodes | Unchanged |
+| `batch_size` | 512 | Increased from 32 (Trial 1) |
+| `num_samples` | 512 | Increased from 64 (Trial 1) |
+| `buffer_device` | CUDA:0 | Forced (was CPU fallback) |
+| `use_sit` | False | Pure TD-MPC2 Baseline |
 
 ### 2. Execution & Results
-- **Command**: `python train_sit_tdmpc.py` (v2)
-- **Status**: ⏳ Running
-- **Insights**: SIT updates are now driving the agent to seek "cut" boundaries between discovered topological zones.
+- **Command**: `python train.py ... batch_size=512 num_samples=512`
+- **Status**: ⚠️ Optimization Divergence
+- **Key Metrics**:
+    - Step 100k Reward: `-50.7` (Baseline was `433.8`)
+    - Step 187k Reward: `-35.8`
+- **Diagnosis**: 
+    1. **Sampling/Batch Parity**: Setting `batch_size=512` with a fresh buffer meant the agent was performing 512 updates using a single episode repeatedly, causing massive overfitting to a cold start.
+    2. **Latent Collapse**: Without SIT or large-scale diversity, the world model collapsed under high-batch gradient pressure before finding the track.
+- **Verdict**: The high batch size (512) is "too heavy" for the early exploration phase. Reverting to standard high-performance config (`batch=256`, `samples=512`) for stability.
