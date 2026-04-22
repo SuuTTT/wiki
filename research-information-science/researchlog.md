@@ -67,14 +67,28 @@
 
 ### 2. Execution & Results
 - **Command**: `python train.py task=walker-walk +use_sit=true +sit_coef=0.1`
-- **Status**: 🏁 Baseline Completed | ⏳ SIT Running
+- **Status**: 🏁 Baseline Completed | ⏳ SIT Phase 1 Running
 - **Key Metrics**:
-    - **TD-MPC2 Baseline**: `990.7 Reward` at 41.5k steps.
-    - **SIT Performance**: TBD
-- **Insights**: Abandoning CarRacing-v3 due to 88 SPS limit; DMControl state-based tasks yield ~500+ SPS, allowing 1M step runs in <1h.
-- **Action for next iteration**: Compare SIT latent graph convergence against standard consistency loss.
+    - **TD-MPC2 Baseline**: `R: 970` at 25k steps (1500s). `R: 990.7` Peak at 41.5k steps.
+    - **SIT Performance**: `R: 988.3` at 56.5k steps (3660s). 
+- **Observations**: 
+    1. **Duplicate Run Issue**: Identified a ghost process (PID 1005837) running in parallel, causing GPU contention and doubling the wall-time per iteration. Terminated to restore performance.
+    2. **Convergence Speed**: SIT shows slightly more variance in the early phase (900-980 range) compared to the flat baseline, likely due to the additional representation constraint. However, the `sit_loss` has stabilized at ~1.1-1.2.
+- **Action for next iteration**: Monitor if SIT maintains higher peak reward and better representation stability in the long-run (>100k steps).
 
 ---
 ## 🔬 Experiment: [CarRacing-v3-Archive-20260421]
 **Hypothesis**: Scaling MPPI samples to 512... (Archived: Environment iteration too slow for research cycle).
 
+
+## 2026-04-21: Multi-Environment SIT Benchmark (50k steps)
+Launched SIT-augmented TD-MPC2 on Cheetah, Walker, and Quadruped.
+
+| Task | Reward (50k) | SIT Loss | Observations |
+| :--- | :--- | :--- | :--- |
+| **Walker-Walk** | 931.7 | ~1.1 | Consistent with previous runs. Plateau reached early. |
+| **Cheetah-Run** | 314.2 | ~1.1 | Moderate performance. Needs longer horizon/steps. |
+| **Quadruped-Walk**| 25.4 | ~1.1 | High variance (episodes fluctuated between 20 and 600). Complexity of 12-DOF action space likely requires higher SIT coef or more samples. |
+
+**Analysis:**
+SIT loss is remarkably stable across environments at ~1.1. This suggests the latent transition graph self-organizes into a similar topological structure regardless of dimensions. Quadruped showed interesting "spiky" reward patterns, potentially indicating SIT is regularizing towards a few stable gait modes.

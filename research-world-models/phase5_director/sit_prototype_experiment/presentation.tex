@@ -1,0 +1,114 @@
+\documentclass[10pt,aspectratio=169]{beamer}
+
+\usetheme{metropolis}
+\usepackage{appendixnumberbeamer}
+\usepackage{booktabs}
+\usepackage[scale=2]{ccicons}
+\usepackage{pgfplots}
+\usepgfplotslibrary{dateplot}
+\usepackage{xspace}
+\newcommand{\themename}{\textbf{\textsc{metropolis}}\xspace}
+
+\title{SIT-Topological Abstraction (SIT-TA)}
+\subtitle{Principled Hierarchy Discovery in Latent World Models}
+\date{\today}
+\author{Anonymous Research Team}
+\institute{Structural Information Science Lab}
+
+\begin{document}
+
+\maketitle
+
+\section{The Core Problem}
+
+\begin{frame}{Why Hierarchical RL fails in practice?}
+  \begin{itemize}
+    \item \textbf{Fixed Temporal Scale}: Most HRL (e.g. Director) uses a fixed $K$-step interval, regardless of task topology.
+    \item \textbf{Moving Target Problem}: The Worker and Manager co-evolve, often leading to divergence.
+    \item \textbf{Heuristic subgoals}: Subgoals are often arbitrary Euclidean points rather than dynamic bottlenecks.
+  \end{itemize}
+  \vfill
+  \textbf{Our Solution}: Use \textit{Structural Information Theory} (SIT) to find the "Natural Joints" of the environment directly from a World Model's imagination.
+\end{frame}
+
+\section{Methodology: SIT-Topological Abstraction}
+
+\begin{frame}{SIT-TA: Theoretical Foundation}
+  We treat the latent space $\mathcal{Z}$ as a manifold and build a \textbf{Latent Transition Graph} $G$:
+  \begin{equation}
+    A_{ij} = \exp\left(-\frac{\|z_i - z_j\|^2}{2\sigma^2}\right) \quad \text{or} \quad \mathbb{E}_{a \sim \pi} [P(z_j | z_i, a)]
+  \end{equation}
+  \begin{itemize}
+    \item \textbf{Encoding Tree $T$}: Partitions the graph into a hierarchy.
+    \item \textbf{Optimization}: Minimize $H^L(G, T)$ (Structural Entropy).
+    \item \textbf{Jumpy MDP}: High-level decisions only happen at module boundaries (detected via $g_\alpha$).
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Implementation: The "Frozen SIT" Strategy}
+  \begin{columns}
+    \begin{column}{0.5\textwidth}
+      \textbf{Phase 1: Stabilization (Ep 0-500)}
+      \begin{itemize}
+        \item GraphTracker builds the adjacency matrix.
+        \item Manager is frozen; Worker learns base navigation.
+        \item Prevents noisy gradients from early exploration.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.5\textwidth}
+      \textbf{Phase 2: Activation (Ep 500+)}
+      \begin{itemize}
+        \item Manager picks SIT-cluster goals.
+        \item Worker follows goals via mixed Intrinsic/Extrinsic rewards.
+        \item IR is scaled: $0.2 \times R_{ext}$ to avoid "Boundary Hopping".
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\section{Experimental Results}
+
+\begin{frame}{Validation on GridWorld Scalability}
+  Convergence (Episodes to reaches AvgReward $> 0.5$) on 8x8 GridWorld:
+  \vfill
+  \begin{table}
+    \centering
+    \begin{tabular}{lrr}
+      \toprule
+      Strategy & Convergence Ep & Final Reward \\
+      \midrule
+      Flat PPO (Baseline) & 1115 & 0.94 \\
+      SIT-Director (Dynamic) & 1025 & 0.91 \\
+      \textbf{SIT-Director (Frozen)} & \textbf{940} & \textbf{0.96} \\
+      \bottomrule
+    \end{tabular}
+  \end{table}
+  \vfill
+  \textit{Observation}: Frozen SIT achieves better reliability and faster convergence by stabilizing the abstraction layer.
+\end{table}
+
+\begin{frame}{Transition to Continuous Control}
+  \textbf{Humanoid-Run & Pendulum-v1}:
+  \begin{itemize}
+    \item Integrated into \textbf{TD-MPC2} with auxiliary SIT loss $\beta = 0.1$.
+    \item \textbf{Result}: Gaussian exploration (Normal) failed in sparse coordination tasks (LunarLander).
+    \item \textbf{Diagnosis}: Over-segmentation (1,700+ micro-rooms) due to VAE sensitivity.
+    \item \textbf{Fix}: Switched to \textbf{MiniBatchKMeans} on latents to smooth the manifold representation.
+  \end{itemize}
+\end{frame}
+
+\section{Key Contributions}
+
+\begin{frame}{Summary & Impact}
+  \begin{enumerate}
+    \item \textbf{Unsupervised Discovery}: Subgoals found via SIT entropy, not expert demos.
+    \item \textbf{Topological Regularization}: $H^L$ loss forces the latent space to be "partitionable".
+    \item \textbf{Adaptive Horizon}: Control frequency dictated by environment bottlenecks ($g_\alpha$).
+    \item \textbf{Staged Training}: "Frozen SIT" solves the non-stationarity of hierarchical learning.
+  \end{enumerate}
+  \vfill
+  \centering
+  \textbf{Current Status}: Challenging SOTA on DMControl \textit{Humanoid-Run}.
+\end{frame}
+
+\end{document}

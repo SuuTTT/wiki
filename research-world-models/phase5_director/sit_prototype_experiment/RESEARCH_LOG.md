@@ -200,6 +200,7 @@ Both environments failed to reach basic performance benchmarks (Pendulum needs ~
 
 ### 2. Prototype v2 (Optimized): "Hardware Acceleration"
 - **Method**: Moved all tensors to `cuda`. Replaced fixed grid with `MiniBatchKMeans`.
+- **Command**: `python3 sit_continuous_v2_optimized.py`
 - **Finding**: While SIT-v2 ran 10x faster, the **base PPO policy** itself was failing to solve the environments (Pendulum stuck at -1400).
 
 ### 3. Stability Benchmark (Current): "The Standard-Rigid PPO"
@@ -207,11 +208,13 @@ Both environments failed to reach basic performance benchmarks (Pendulum needs ~
     - GAE ($\lambda=0.95$)
     - Observation & Reward Normalization
     - Orthogonal Initialization
+- **Command**: `python3 ppo_debug_scaling.py`
+- **Log Path**: `/workspace/logs/continuous_study/ppo_raw_benchmark.log`
 - **The "Small Reward" Confusion**:
     - Observations showed Rewards of $\approx -10$.
     - **Discovery**: This is an artifact of `NormalizeReward`.
     - **Side-by-Side Validation**:
-        - Raw Reward: **-1437** (Failing)
+        - Raw Reward: **-1437** (Failing / Local Minima)
         - Normalized Reward: **-18** (Appearing stable but not solving)
 - **Problem Diagnosis**: 
     - The `LunarLander` is crashing with massive negative rewards (`-82272` raw). 
@@ -242,3 +245,18 @@ Both environments failed to reach basic performance benchmarks (Pendulum needs ~
 
 ### 3. Immediate Action: The Beta Distribution Hypothesis
 Standard Gaussian PPO (Normal) struggles with Pendulum because it samples heavily from the center. A **Beta** distribution forces exploration at the boundaries of the action space $[-2, 2]$, which is the only way to generate enough torque for a swing-up.
+
+---
+
+## 📋 Iteration 15: The "Beta Distribution" Stability Wall
+**Objective**: Force boundary exploration using a Beta policy to solve Pendulum swing-up.
+
+- **Command**: `python3 ppo_cleanrl_beta.py`
+- **Log Path**: `/workspace/logs/continuous_study/pendulum_beta.log`
+- **Result**: **FAILURE (Numerical Instability)**.
+- **Finding**: 
+    - The Beta distribution $Beta(\alpha, \beta)$ requires parameters $>1$ to avoid boundary singularities. 
+    - Even with `softplus` and offsets, the model encountered frequent **NaN outputs** in the observation space. 
+    - **Diagnosis**: Pendulum-v1 observations (sine/cosine of angle and velocity) occasionally explode under "boundary-heavy" policies if not capped, leading to NaN gradients that kill the Beta distribution parameters.
+- **Action**: All background training stopped to prioritize GPU resources for higher-level tasks. Continuous control remains the primary bottleneck for SIT-Director.
+

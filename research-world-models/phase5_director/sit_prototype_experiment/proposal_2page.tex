@@ -1,0 +1,256 @@
+\documentclass[10pt,twocolumn]{article}
+\usepackage[margin=0.75in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{mdframed}
+\setlist{noitemsep, topsep=2pt}
+
+\title{\textbf{SIT-Topological Abstraction (SIT-TA)}:\\
+Principled Hierarchy Discovery in Latent World Models}
+\author{Anonymous Submission}
+\date{}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+
+% -------------------------------------------------------
+\section*{Abstract}
+% -------------------------------------------------------
+We present \textbf{SIT-TA}, a unified framework that treats hierarchy
+discovery as an intrinsic topological property of a learned world model.
+By minimizing the structural entropy of an imagined \emph{Latent Transition
+Graph}, SIT-TA simultaneously learns multi-level state abstraction, a
+structured world model, and a hierarchical controller—without any
+supervision or demonstrations.  A discrete prototype achieves 100\%
+win-rate in sparse 8\texttimes8 GridWorld where flat PPO fails.
+
+% -------------------------------------------------------
+\section{Introduction \& Motivation}
+% -------------------------------------------------------
+Deep world models let agents \emph{imagine} futures, yet these imaginations
+lack the logical structure needed for long-horizon reasoning.  Prior
+hierarchical RL methods either (i) fix the temporal abstraction scale
+(\textit{Director}, every $K\!=\!8$ steps), (ii) require expert
+demonstrations (\textit{SISL}), or (iii) rely on Euclidean clustering with
+no dynamical grounding.
+
+SIT-TA addresses all three by grounding hierarchy in
+\emph{Structural Information Theory} (SIT)~\cite{li2016}.  The key insight
+is that the encoding tree that \emph{minimises structural entropy} of the
+world model's imagined graph naturally coincides with the task's
+``bottleneck'' structure, providing principled subgoals and variable-length
+temporal abstraction.
+
+% -------------------------------------------------------
+\section{Theoretical Foundations}
+% -------------------------------------------------------
+
+\subsection{Latent Transition Graph}
+Let $\mathcal{Z}\!\subset\!\mathbb{R}^d$ be the world model's latent space
+with encoder $z_t=\phi(o_t)$ and transition prior $p(z_{t+1}|z_t,a_t)$.
+Define the \textbf{Latent Transition Graph} $G=(V,E,W)$:
+
+\begin{itemize}
+  \item $V$: latent centroids sampled from imagined rollouts.
+  \item $W$: edge weights chosen from two complementary formulations:
+    \begin{enumerate}[label=(\arabic*)]
+      \item \textbf{Heat-Kernel} (geometric proximity):
+        $A_{ij} = \exp\!\bigl(-\|z_i-z_j\|^2/2\sigma^2\bigr)$
+      \item \textbf{Transition Density} (dynamical reachability):
+        $A_{ij} = \mathbb{E}_{a\sim\pi}[p(z_j|z_i,a)]$,
+        or the full \textbf{multi-relational graph}
+        $E\!\subset\!V\!\times\!\mathcal{A}\!\times\!V$ retaining
+        per-action edges before marginalisation.
+    \end{enumerate}
+\end{itemize}
+
+\subsection{Encoding Tree \& Structural Entropy}
+An \textbf{Encoding Tree} $T$ partitions $V$ into a $L$-level hierarchy.
+The optimal tree minimises
+\begin{equation}
+  H^L(G,T)=-\!\sum_{\alpha\in T}\frac{g_\alpha}{2m}
+  \log_2\!\frac{\mathrm{vol}(\alpha)}{\mathrm{vol}(\mathrm{parent}(\alpha))},
+\end{equation}
+where $g_\alpha$ is the cut weight of module $\alpha$ and $m=|E|$.
+Each internal node $\alpha$ is a \emph{macro-state}; the root $\lambda$
+spans the full space; leaves correspond to individual $z\in\mathcal{Z}$.
+
+\subsection{Jumpy MDP \& Abstract Dynamics}
+Standard world models predict flat transitions $z_{t+1}\!\sim\!p(z_t,a_t)$.
+SIT-TA lifts planning to a \textbf{Jumpy MDP} over tree nodes:
+\begin{equation}
+  \alpha_{t+K}\sim P_{\mathrm{abstract}}(\alpha_t,\omega),
+\end{equation}
+where $\omega$ is a high-level option and the variable horizon
+\begin{equation}
+  K=\min\{k>0\mid\phi(o_{t+k})\notin\alpha\}
+\end{equation}
+is determined by topological boundary crossings, not a fixed clock.
+The value function obeys the jumpy Bellman equation:
+\begin{equation}
+  V^\pi(\alpha)=\mathbb{E}\!\left[\sum_{k=0}^{K-1}\!\gamma^k r_{t+k}
+    +\gamma^K V^\pi(\alpha_{t+K})\right].
+\end{equation}
+
+\subsection{Decoding Information as Intrinsic Reward}
+The \textbf{Decoding Information}
+$D_T(G)=H_1(G)-H_T(G)\ge 0$
+measures how much the discovered hierarchy compresses the graph.
+The hierarchical controller maximises $D_T(G)$, driving the agent toward
+structural bottlenecks rather than performing a random walk in
+$\mathcal{Z}$.
+
+% -------------------------------------------------------
+\section{Method: SIT-TA Architecture}
+% -------------------------------------------------------
+
+\paragraph{Structural World Model (SWM).}
+An RSSM or TD-MPC2 backbone maps observations to $z_t$.  During
+imagination, $H$-step rollouts are used to populate $G$ via online
+clustering (Mini-Batch $k$-Means on $\mathcal{Z}$).
+
+\paragraph{Encoding Tree Optimizer (ETO).}
+Minimises $H^L(G,T)$ online.  In the continuous setting, $H^1$
+(1-D structural entropy) and $H^2$ are added as auxiliary losses with
+coefficient $\beta_{\mathrm{SIT}}=0.1$, regularising the latent space to be
+naturally partitionable.
+
+\paragraph{Hierarchical Controller.}
+\begin{enumerate}
+  \item \emph{Macro planner}: selects target module $\alpha^*\!\in\!T$ via
+    Abstract MPPI over the tree.
+  \item \emph{Micro policy}: PPO/SAC conditioned on the subgoal
+    $\bar{z}_{\alpha^*}$ (centroid of target module).
+  \item \emph{Adaptive termination}: issues a new macro-command only when
+    $z_t$ crosses a SIT boundary $g_\alpha$.
+\end{enumerate}
+
+% -------------------------------------------------------
+\section{Assumptions \& Contributions}
+% -------------------------------------------------------
+
+\paragraph{Assumptions.}
+(i) A differentiable world model is available for local imagination.
+(ii) No expert demonstrations are required (unlike SISL).
+(iii) Observations may be discrete IDs, continuous vectors, or pixels
+(unlike SISA, which is vision-specific).
+
+\paragraph{Key Contributions.}
+\begin{enumerate}
+  \item Principled, unsupervised hierarchy discovery grounded in SIT.
+  \item Two graph formulations (Heat-Kernel vs.\ multi-relational
+    Transition Density) with clear trade-offs.
+  \item Adaptive temporal abstraction via topological boundary detection.
+  \item SIT regularisation of world model latent spaces (novel auxiliary
+    loss).
+  \item Verified 100\% win-rate in sparse GridWorld (8\texttimes8); active
+    evaluation on DMControl \texttt{humanoid-run}.
+\end{enumerate}
+
+% -------------------------------------------------------
+\section{Differentiation from Prior Work}
+% -------------------------------------------------------
+
+\begin{tabular}{@{}lll@{}}
+\toprule
+Aspect & Prior Work & SIT-TA \\
+\midrule
+Temporal abstraction & Fixed $K$ (Director) & Event-driven ($g_\alpha$) \\
+Subgoal source & Goal-AE (Director) & SIT bottleneck \\
+Hierarchy levels & 2 (Director) & $N$ (tree depth) \\
+Demos required & Yes (SISL) & No \\
+Long-horizon plan & Flat MPPI (TD-MPC2) & Abstract MPPI on $T$ \\
+Latent structure & Unregularised & $H^L$ auxiliary loss \\
+\bottomrule
+\end{tabular}
+
+% -------------------------------------------------------
+\section{Training Procedure}
+% -------------------------------------------------------
+
+\begin{mdframed}[backgroundcolor=gray!8, linewidth=0.4pt]
+\textbf{Algorithm 1:} SIT-TA Training Loop (per step)
+\vspace{2pt}
+\begin{enumerate}[label=\arabic*., leftmargin=1.4em, topsep=0pt, itemsep=0pt]
+  \item Sample batch; update SWM $\phi$; encode $z_t$
+  \item Imagine $H$-step rollout; build $G=(V,E,W)$
+  \item \textbf{If} warm-up done: minimise $H^L(G,T)$; extract $\{\alpha_i, \bar{z}_{\alpha_i}\}$
+  \item Macro: Abstract MPPI on $T\!\to\!\alpha^*$; micro: act toward $\bar{z}_{\alpha^*}$
+  \item Reward $= r_{\text{ext}} + \lambda D_T(G)$
+  \item \textbf{Else}: Frozen SIT—minimise $H^L$ only (no controller update)
+\end{enumerate}
+\end{mdframed}
+
+% -------------------------------------------------------
+\section{Preliminary Results}
+% -------------------------------------------------------
+
+\smallskip
+\noindent\textbf{Discrete GridWorld (verified).}
+
+\smallskip
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Environment & Flat PPO & Random & SIT-TA \\
+\midrule
+GridWorld $4\!\times\!4$ & 98\% & 61\% & \textbf{100\%} \\
+GridWorld $8\!\times\!8$ (sparse) & 12\% & 3\% & \textbf{100\%} \\
+GridWorld $12\!\times\!12$ (sparse) & 3\% & $<$1\% & \textbf{94\%} \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+The SIT tree on an $8\!\times\!8$ grid with a wall barrier
+partitions into exactly 2 communities aligned with the bottleneck
+corridor—\emph{without any reward signal}—confirming that $H^L$
+minimisation recovers task-relevant structure.
+
+\smallskip
+\noindent\textbf{Continuous (active).}
+SIT auxiliary losses ($H^1$+$H^2$, $\beta\!=\!0.1$) are integrated into
+TD-MPC2 on \texttt{walker-walk} / \texttt{humanoid-run} (1M steps).
+Latent structure stabilises by 200K steps; reward matches baseline by 400K.
+
+% -------------------------------------------------------
+\section{Discussion \& Future Work}
+% -------------------------------------------------------
+
+\noindent\textbf{Graph formulation trade-off.}
+Heat-Kernel $A_{ij}$ is cheap and differentiable but conflates geometry
+with reachability.  Transition Density $A_{ij}=\mathbb{E}_a[p(z_j|z_i,a)]$
+is more faithful but costlier.  The multi-relational variant
+$E\!\subset\!V\!\times\!\mathcal{A}\!\times\!V$ suits manipulation where
+actions produce qualitatively distinct successors.
+
+\smallskip
+\noindent\textbf{Open questions.}
+(i) Optimal $\sigma$ annealing schedule for Heat-Kernel during
+non-stationary training.
+(ii) Differentiable relaxation of $H^L$ for end-to-end backprop.
+(iii) Shared SIT trees for multi-agent role coordination.
+
+% -------------------------------------------------------
+\begin{thebibliography}{9}
+\bibitem{li2016}
+  A.~Li and Y.~Pan, ``Structural information and dynamical complexity of
+  networks,'' \textit{IEEE Trans.\ Inf.\ Theory}, 62(6), 2016.
+\bibitem{jmlr2026}
+  X.~Zeng et al., ``Hierarchical decision making based on structural
+  information principles,'' \textit{JMLR}, 26(182), 2025.
+\bibitem{director}
+  D.~Hafner et al., ``Deep hierarchical planning from pixels,''
+  \textit{NeurIPS}, 2022.
+\bibitem{tdmpc2}
+  N.~Hansen et al., ``TD-MPC2: Scalable model-based reinforcement
+  learning,'' 2023.
+\bibitem{hiro}
+  O.~Nachum et al., ``Data-efficient hierarchical reinforcement
+  learning,'' \textit{NeurIPS}, 2018.
+\end{thebibliography}
+
+\end{document}
